@@ -1,0 +1,72 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main  # 2. Automatically verifies push is to 'main'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for creating tags and releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Lint Code 
+        run: |
+          pip install flake8
+          flake8 src/ tests/ --max-line-length=100
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'  # Specify the Python version you want to use
+          
+      - name: Install dependencies
+        run: |
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pip install -e .
+
+      - name: Run tests
+        run: |
+          # Run your tests here (e.g., using pytest)
+          pip install pytest
+          python3 -m pytest tests/
+
+      - name: Read version from .version
+        id: get_version
+        # 1. Reads the value from .version and stores it as an environment variable
+        run: |
+          VERSION=$(cat .version)
+          echo "VERSION=v$VERSION" >> $GITHUB_ENV
+
+          # Validate version format (basic check)
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Version format is invalid. Expected format: X.Y.Z"
+            exit 1
+          fi
+          echo "Validated version: $VERSION"
+
+      - name: Create Git Tag
+        # 3. Creates and pushes a Git tag based on the version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ env.VERSION }}
+          git push origin ${{ env.VERSION }}
+
+      - name: Create GitHub Release
+        id: create_release
+        # 4. Creates a GitHub Release for the pushed tag
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: false
+          latest_tag: true
