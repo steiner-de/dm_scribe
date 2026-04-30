@@ -1,0 +1,9 @@
+discord.py>=2.0.0
+python-dotenv
+stt  # Coqui STT library
+pydub
+pyaudio
+transformers  # For LLM integration
+torch  # PyTorch for model inference
+datasets  # For data handling in fine-tuning
+accelerate  # For efficient training/inference
