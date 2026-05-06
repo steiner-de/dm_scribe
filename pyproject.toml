@@ -14,9 +14,10 @@ dependencies = [
     "stt",
     "pydub",
     "pyaudio",
-    "lancedb",
+    "chromadb",
     "transformers",
     "torch",
+    "einops",
     "datasets",
     "accelerate"
 ]

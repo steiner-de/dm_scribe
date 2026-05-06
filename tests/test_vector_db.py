@@ -1,13 +1,14 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from vector_db import HashingEmbeddingProvider, VectorDB
+from vector_db import HashingEmbeddingProvider, NomicEmbeddingProvider, VectorDB
 
 
 def db_path():
@@ -63,3 +64,80 @@ def test_search_rejects_unsupported_metadata_filter():
 
     with pytest.raises(ValueError, match="Unsupported metadata filter"):
         db.search("artifact", metadata_filter={"campaign_id": "campaign-1"})
+
+
+def test_vector_db_uses_document_and_query_embedding_modes():
+    embedder = RecordingEmbeddingProvider()
+    db = VectorDB(db_path(), embedder=embedder)
+
+    db.add_text("The silver dragon guards the moon temple.", {"kind": "lore"})
+    db.search("dragon temple")
+
+    assert embedder.input_types == ["document", "query"]
+
+
+def test_nomic_embedding_provider_defaults_to_current_local_model():
+    embedder = NomicEmbeddingProvider()
+
+    assert embedder.model_name == "nomic-ai/nomic-embed-text-v1.5"
+    assert embedder.tokenizer_name == "bert-base-uncased"
+    assert embedder.max_length == 8192
+    assert embedder.dimensions == 768
+
+
+def test_nomic_embedding_provider_uses_expected_model_load_options(monkeypatch):
+    calls = {}
+
+    class FakeTokenizer:
+        @staticmethod
+        def from_pretrained(name, **kwargs):
+            calls["tokenizer"] = (name, kwargs)
+            return object()
+
+    class FakeModel:
+        def to(self, device):
+            calls["device"] = device
+            return self
+
+        def eval(self):
+            calls["eval"] = True
+
+    class FakeAutoModel:
+        @staticmethod
+        def from_pretrained(name, **kwargs):
+            calls["model"] = (name, kwargs)
+            return FakeModel()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(AutoModel=FakeAutoModel, AutoTokenizer=FakeTokenizer),
+    )
+
+    embedder = NomicEmbeddingProvider(device="cpu", max_length=8192)
+    embedder._load_model()
+
+    assert calls["tokenizer"] == ("bert-base-uncased", {"model_max_length": 8192})
+    assert calls["model"] == (
+        "nomic-ai/nomic-embed-text-v1.5",
+        {"trust_remote_code": True, "rotary_scaling_factor": 2.0},
+    )
+    assert calls["device"] == "cpu"
+    assert calls["eval"] is True
+
+
+def test_nomic_embedding_provider_validates_dimensions():
+    with pytest.raises(ValueError, match="dimensions"):
+        NomicEmbeddingProvider(dimensions=0)
+
+    with pytest.raises(ValueError, match="dimensions"):
+        NomicEmbeddingProvider(dimensions=769)
+
+
+class RecordingEmbeddingProvider:
+    def __init__(self):
+        self.input_types = []
+
+    def embed(self, text, *, input_type="document"):
+        self.input_types.append(input_type)
+        return HashingEmbeddingProvider(dimensions=64).embed(text)

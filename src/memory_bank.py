@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import re
 from typing import Protocol
 
-from vector_db import VectorDB
+from vector_db import Metadata, SearchResult, VectorDB, VectorRecord
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,10 @@ class MemoryBank:
         self,
         transcript: str,
         session_id: str,
+        guild: str = "unknown",
         channel_name: str = "unknown",
+        note_path: str = "",
+        session_date: str | None = None,
     ) -> SessionNotes:
         cleaned_transcript = transcript.strip()
         if not cleaned_transcript:
@@ -69,33 +72,36 @@ class MemoryBank:
 
         notes = self.notes_generator.generate_notes(cleaned_transcript, session_id)
         timestamp = datetime.now(timezone.utc).isoformat()
+        metadata = self._metadata(
+            session_id=session_id,
+            guild=guild,
+            channel_name=channel_name,
+            session_date=session_date or timestamp[:10],
+            note_path=note_path,
+            summary_text=notes.summary,
+            created_at=timestamp,
+        )
 
         self.vector_db.add_text(
             cleaned_transcript,
             {
+                **metadata,
                 "kind": "transcript",
-                "session_id": session_id,
-                "channel": channel_name,
-                "created_at": timestamp,
             },
         )
         self.vector_db.add_text(
             notes.summary,
             {
+                **metadata,
                 "kind": "session_summary",
-                "session_id": session_id,
-                "channel": channel_name,
-                "created_at": timestamp,
             },
         )
         self.vector_db.add_many(
             (
                 entry,
                 {
+                    **metadata,
                     "kind": "lore",
-                    "session_id": session_id,
-                    "channel": channel_name,
-                    "created_at": timestamp,
                 },
             )
             for entry in notes.lore_entries
@@ -103,8 +109,78 @@ class MemoryBank:
 
         return notes
 
+    def remember_note(
+        self,
+        note_text: str,
+        session_id: str,
+        summary_text: str,
+        guild: str = "unknown",
+        channel_name: str = "unknown",
+        note_path: str = "",
+        session_date: str | None = None,
+    ) -> VectorRecord:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        return self.vector_db.add_text(
+            note_text,
+            {
+                **self._metadata(
+                    session_id=session_id,
+                    guild=guild,
+                    channel_name=channel_name,
+                    session_date=session_date or timestamp[:10],
+                    note_path=note_path,
+                    summary_text=summary_text,
+                    created_at=timestamp,
+                ),
+                "kind": "note",
+            },
+        )
+
     def search_lore(self, query: str, limit: int = 5):
         return self.vector_db.search(query, limit=limit, metadata_filter={"kind": "lore"})
 
+    def search_notes(self, query: str, limit: int = 5):
+        return self.vector_db.search(query, limit=limit, metadata_filter={"kind": "note"})
+
     def search_session(self, query: str, session_id: str, limit: int = 5):
         return self.vector_db.search(query, limit=limit, metadata_filter={"session_id": session_id})
+
+    def build_context(self, query: str, limit: int = 5) -> str:
+        results = self.vector_db.search(query, limit=limit)
+        return "\n\n".join(self._context_snippet(result) for result in results)
+
+    def _metadata(
+        self,
+        *,
+        session_id: str,
+        guild: str,
+        channel_name: str,
+        session_date: str,
+        note_path: str,
+        summary_text: str,
+        created_at: str,
+    ) -> Metadata:
+        return {
+            "session_id": session_id,
+            "guild": guild,
+            "channel": channel_name,
+            "session_date": session_date,
+            "note_path": note_path,
+            "summary_text": summary_text,
+            "created_at": created_at,
+        }
+
+    def _context_snippet(self, result: SearchResult) -> str:
+        metadata = result.record.metadata
+        source = " | ".join(
+            part
+            for part in (
+                metadata.get("session_date"),
+                metadata.get("guild"),
+                metadata.get("note_path") or metadata.get("kind"),
+            )
+            if part
+        )
+        if source:
+            return f"[{source}]\n{result.record.text}"
+        return result.record.text
