@@ -8,7 +8,7 @@ import os
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Transcription settings
-TRANSCRIPTION_SERVICE = os.getenv('TRANSCRIPTION_SERVICE', 'whisper')  # 'whisper', 'google', etc.
+TRANSCRIPTION_SERVICE = os.getenv('TRANSCRIPTION_SERVICE', 'faster-whisper')  # 'faster-whisper', 'google', etc.
 WHISPER_MODEL = os.getenv('WHISPER_MODEL', 'base')  # tiny, base, small, medium, large
 
 # Audio settings
@@ -21,4 +21,4 @@ DEFAULT_TEXT_CHANNEL = os.getenv('DEFAULT_TEXT_CHANNEL_ID')
 
 # Bot settings
 COMMAND_PREFIX = '!'
-BOT_ACTIVITY = "Transcribing voice calls for D&D sessions"
+BOT_ACTIVITY = "Fly Scribe: a fly-on-the-wall voice transcriber, note keeper, and lore builder for D&D sessions"

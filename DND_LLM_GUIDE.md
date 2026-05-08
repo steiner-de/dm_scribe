@@ -4,7 +4,7 @@
 This guide outlines how to build and fine-tune a custom Large Language Model (LLM) specialized for your homebrewed D&D world. Since training an LLM from scratch requires massive resources (data, compute, time), we'll focus on **fine-tuning an existing open-source model** using your custom D&D content.
 
 ## Prerequisites
-- Python 3.8+
+- Python 3.13+
 - GPU with at least 8GB VRAM (NVIDIA recommended for efficiency)
 - 50GB+ free disk space
 - Access to D&D materials (rulebooks, homebrew docs, campaign notes)
