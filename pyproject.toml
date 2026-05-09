@@ -29,3 +29,11 @@ dev = [
 
 [tool.setuptools]
 packages = ["src"]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W"]
+ignore = ["E203","F401"]
+exclude = ['.git', '__pycache__', 'venv', '.venv']

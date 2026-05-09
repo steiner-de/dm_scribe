@@ -9,6 +9,7 @@ import requests
 from datetime import datetime
 import os
 
+
 class Transcriber:
     def __init__(self):
         self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
@@ -48,7 +49,7 @@ class Transcriber:
         # For now, assume the transcription is dialogue and replace known names
         enhanced = transcription
         for discord_handle, info in character_map.items():
-            character_name = info.get('name', discord_handle)
+            character_name = info.get("name", discord_handle)
             # Replace mentions of discord_handle with character name
             enhanced = enhanced.replace(discord_handle, character_name)
         return enhanced
@@ -56,7 +57,15 @@ class Transcriber:
     def summarize_with_llm(self, transcription, character_map):
         """Use local Mistral 7B via Ollama to summarize the transcription."""
         try:
-            char_info = "\n".join([f"{handle}: {info['name']} - Class: {info.get('class', 'Unknown')}, Species: {info.get('species', 'Unknown')}, Gender: {info.get('gender', 'Unknown')}" for handle, info in character_map.items()])
+            char_info = "\n".join(
+                [
+                    (f"{handle}: {info['name']} - "
+                        "Class: {info.get('class', 'Unknown')}, "
+                        "Species: {info.get('species', 'Unknown')}, "
+                        "Gender: {info.get('gender', 'Unknown')}")
+                    for handle, info in character_map.items()
+                ]
+            )
             prompt = f"""
             Summarize the following D&D session transcription. Focus on:
             - Key events and plot points
@@ -71,13 +80,12 @@ class Transcriber:
 
             Provide a brief summary, notes on lore/loot, and any memorable quotes.
             """
-            response = requests.post('http://localhost:11434/api/generate', json={
-                'model': 'mistral',
-                'prompt': prompt,
-                'stream': False
-            })
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={"model": "mistral", "prompt": prompt, "stream": False},
+            )
             if response.status_code == 200:
-                return response.json()['response']
+                return response.json()["response"]
             else:
                 return f"Error: {response.status_code} - {response.text}"
         except Exception as e:
@@ -98,15 +106,21 @@ class Transcriber:
         """
         try:
             # Create notes directory if it doesn't exist
-            if not os.path.exists('obsidian_notes'):
-                os.makedirs('obsidian_notes')
+            if not os.path.exists("obsidian_notes"):
+                os.makedirs("obsidian_notes")
 
             # Generate filename with timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"obsidian_notes/D&D_Session_{timestamp}.md"
 
             # Extract character list from character_map
-            characters = "\n".join([f"- **{info['name']}** ({info.get('class', 'Unknown')} {info.get('species', 'Unknown')})" for info in character_map.values()])
+            characters = "\n".join(
+                [
+                    (f"- **{info['name']}** "
+                     f"({info.get('class', 'Unknown')} {info.get('species', 'Unknown')})")
+                    for info in character_map.values()
+                ]
+            )
 
             # Create Obsidian markdown with frontmatter
             content = f"""---
@@ -133,7 +147,7 @@ session_name: {session_name or f"Session {timestamp}"}
 """
 
             # Write to file
-            with open(filename, 'w', encoding='utf-8') as f:
+            with open(filename, "w", encoding="utf-8") as f:
                 f.write(content)
 
             return filename
