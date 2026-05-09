@@ -2,26 +2,26 @@
 Training script for fine-tuning a D&D-specific LLM.
 """
 
-import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling
+    DataCollatorForLanguageModeling,
 )
 from datasets import load_dataset
-import os
+
 
 def load_data(data_path):
     """Load and preprocess training data."""
     # Assuming data is in JSON Lines format
-    dataset = load_dataset('json', data_files=data_path)
+    dataset = load_dataset("json", data_files=data_path)
     return dataset
+
 
 def tokenize_function(examples, tokenizer):
     """Tokenize the data."""
-    return tokenizer(examples['text'], truncation=True, padding='max_length', max_length=512)
+    return tokenizer(examples["text"], truncation=True, padding="max_length", max_length=512)
+
 
 def main():
     # Configuration
@@ -42,14 +42,11 @@ def main():
     tokenized_dataset = dataset.map(
         lambda x: tokenize_function(x, tokenizer),
         batched=True,
-        remove_columns=dataset['train'].column_names
+        remove_columns=dataset["train"].column_names,
     )
 
     # Data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False
-    )
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     # Training arguments
     training_args = TrainingArguments(
@@ -71,7 +68,7 @@ def main():
         model=model,
         args=training_args,
         data_collator=data_collator,
-        train_dataset=tokenized_dataset['train'],
+        train_dataset=tokenized_dataset["train"],
     )
 
     # Train
@@ -82,6 +79,7 @@ def main():
     tokenizer.save_pretrained(output_dir)
 
     print(f"Model saved to {output_dir}")
+
 
 if __name__ == "__main__":
     main()

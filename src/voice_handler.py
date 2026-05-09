@@ -3,11 +3,10 @@ Handles voice channel connections and audio capture.
 """
 
 import discord
-import asyncio
 import pyaudio
 import wave
-import os
 from config import SAMPLE_RATE, CHANNELS
+
 
 class VoiceHandler:
     def __init__(self, bot):
@@ -46,7 +45,7 @@ class VoiceHandler:
             return False
         self.recording = True
         self.audio_frames = []
-        
+
         # Note: For simplicity, we're not implementing real-time audio capture here.
         # In a full implementation, you'd hook into voice_client.listen or use a sink.
         # For now, this is a placeholder.
@@ -57,13 +56,13 @@ class VoiceHandler:
         if not self.recording:
             return None
         self.recording = False
-        
+
         # Save frames to WAV file
-        wf = wave.open(filename, 'wb')
+        wf = wave.open(filename, "wb")
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(self.audio.get_sample_size(pyaudio.paInt16))
         wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(b''.join(self.audio_frames))
+        wf.writeframes(b"".join(self.audio_frames))
         wf.close()
-        
+
         return filename

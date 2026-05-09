@@ -242,6 +242,81 @@ Once the bot is running and connected to your Discord server, use the following 
 - Configure transcription service API keys
 - Set default text channel for outputs
 
+## Development & Linting
+
+### Setup Development Environment
+Install development dependencies:
+
+**On macOS/Linux:**
+```bash
+pip install -r requirements-dev.txt
+```
+
+**On Windows (PowerShell):**
+```powershell
+pip install -r requirements-dev.txt
+```
+
+### Running Linters
+
+**Format code with Black:**
+
+Bash/Zsh:
+```bash
+black src/ tests/ run.py
+```
+
+PowerShell:
+```powershell
+black src/, tests/, run.py
+```
+
+**Check code style with Flake8:**
+
+Bash/Zsh:
+```bash
+flake8 src/ tests/ run.py
+```
+
+PowerShell:
+```powershell
+flake8 src/ tests/ run.py
+```
+
+**Check with Ruff (faster alternative):**
+
+Bash/Zsh:
+```bash
+ruff check src/ tests/ run.py
+```
+
+PowerShell:
+```powershell
+ruff check src/ tests/ run.py
+```
+
+### Linting Configuration
+Linting rules are configured in `pyproject.toml`:
+- **Black**: Line length 100, Python 3.11+ target
+- **Flake8**: Line length 100, ignores E203 and W503
+- **Ruff**: Similar configuration for fast linting
+
+### Pre-commit Hook (Optional)
+To automatically lint on commit, install pre-commit:
+
+Bash/Zsh:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+PowerShell:
+```powershell
+pip install pre-commit
+pre-commit install
+```
+```
+
 ## Notes
 - Be mindful of Discord's Terms of Service regarding audio recording
 - Ensure proper permissions and user consent for voice recording
