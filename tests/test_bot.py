@@ -5,11 +5,10 @@ Basic tests for the Discord bot.
 import unittest
 import sys
 import os
+from config import DISCORD_TOKEN
 
 # Add src to path for testing
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from config import DISCORD_TOKEN
 
 
 class TestBot(unittest.TestCase):
