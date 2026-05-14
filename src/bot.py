@@ -217,15 +217,16 @@ def main():
             await interaction.response.send_message(f"Failed to change name: {e}")
 
     @bot.slash_command(name="join", description="Join the voice channel you are in.")
-    async def join_voice(interaction: discord.Interaction):
-        if interaction.user.voice is None or interaction.user.voice.channel is None:
-            await interaction.response.send_message(
-                "You need to be in a voice channel to use this command."
-            )
-            return
+    async def join_voice(ctx):
+        voice = ctx.author.voice
 
-        channel = interaction.user.voice.channel
-        voice_client = await bot.voice_handler.join_voice_channel(channel)
+        if not voice:
+            await ctx.respond("Buzz-Buzz, You aren't in a voice channel!")
+
+        voice_client = await voice.channel.connect()  # Connect to the voice channel the author is in.
+
+        channel = voice.channel
+        # voice_client = await bot.voice_handler.join_voice_channel(channel)
         bot.current_voice_client = voice_client
 
         bot_name = interaction.guild.me.display_name
@@ -345,8 +346,7 @@ def main():
 
     @bot.slash_command(name="sync_commands", description="Sync slash commands (admin only).")
     async def sync_commands(
-        interaction: discord.Interaction,
-        global_sync: bool = False,
+        interaction: discord.Interaction
     ):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message(
@@ -356,16 +356,7 @@ def main():
 
         await interaction.response.defer()
         try:
-            if global_sync:
-                synced = await bot.tree.sync()
-                await interaction.followup.send(
-                    f"Globally synced {len(synced)} commands."
-                )
-            else:
-                synced = await bot.tree.sync(guild=interaction.guild)
-                await interaction.followup.send(
-                    f"Synced {len(synced)} commands for this guild."
-                )
+            await bot.sync_commands()
         except Exception as e:
             await interaction.followup.send(f"Failed to sync commands: {e}")
 
