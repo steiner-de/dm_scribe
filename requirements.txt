@@ -1,6 +1,4 @@
-py-cord==2.7.2
-pyNaCl==1.6.2
-davey==0.1.5
+py-cord[voice]==2.8.0rc2
 python-dotenv
 faster-whisper
 pydub

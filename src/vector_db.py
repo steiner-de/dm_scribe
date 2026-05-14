@@ -21,6 +21,8 @@ _METADATA_FIELDS = (
     "note_path",
     "summary_text",
     "created_at",
+    "visibility",
+    "owner_user_id",
 )
 
 

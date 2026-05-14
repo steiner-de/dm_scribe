@@ -9,7 +9,7 @@ description = "Discord bot for transcribing voice calls in D&D sessions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "discord.py>=2.0.0",
+    "py-cord[voice]==2.8.0rc2",
     "python-dotenv",
     "faster-whisper",
     "pydub",
@@ -31,6 +31,11 @@ dev = [
 
 [tool.setuptools]
 packages = ["src"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 
 [tool.ruff]

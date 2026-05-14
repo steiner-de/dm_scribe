@@ -20,6 +20,12 @@ CHANNELS = 1
 
 # Output settings
 DEFAULT_TEXT_CHANNEL = os.getenv("DEFAULT_TEXT_CHANNEL_ID")
+VECTOR_DB_PATH = os.getenv("VECTOR_DB_PATH", "vector_db_data")
+DISCORD_GUILD_IDS = [
+    int(guild_id.strip())
+    for guild_id in os.getenv("DISCORD_GUILD_IDS", "").split(",")
+    if guild_id.strip()
+]
 
 # Bot settings
 COMMAND_PREFIX = "!"

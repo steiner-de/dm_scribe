@@ -12,6 +12,15 @@ import subprocess
 import requests
 import asyncio
 from datetime import datetime
+from memory_bank import (
+    CHARACTER,
+    DM_ONLY,
+    PUBLIC,
+    MemoryBank,
+    format_memory_results,
+    normalize_visibility,
+)
+from vector_db import VectorDB
 from voice_handler import VoiceHandler
 from transcriber import Transcriber
 
@@ -22,20 +31,28 @@ class TranscriberBot(commands.Bot):
         intents.voice_states = True
         intents.message_content = True
 
-        super().__init__(command_prefix=config.COMMAND_PREFIX, intents=intents, help_command=None)
+        super().__init__(
+            command_prefix=config.COMMAND_PREFIX,
+            intents=intents,
+            help_command=None,
+            debug_guilds=config.DISCORD_GUILD_IDS or None,
+        )
 
         self.voice_handler = VoiceHandler(self)
         self.transcriber = Transcriber()
         self.current_voice_client = None
         self.character_map = self.load_character_map()
         self.notes_channel_map = self.load_notes_channel_map()
+        self.memory_bank = self.load_memory_bank()
 
         # Ensure notes directory exists
         if not os.path.exists("obsidian_notes"):
             os.makedirs("obsidian_notes")
 
     async def setup_hook(self):
-        await self.tree.sync()
+        sync_commands = getattr(self, "sync_commands", None)
+        if sync_commands:
+            await sync_commands()
 
     def load_character_map(self):
         """Load character map from file."""
@@ -63,6 +80,21 @@ class TranscriberBot(commands.Bot):
         with open("notes_channel_map.json", "w") as f:
             json.dump(self.notes_channel_map, f)
 
+    def load_memory_bank(self):
+        """Load persistent campaign memory if vector storage is available."""
+        try:
+            return MemoryBank(VectorDB(config.VECTOR_DB_PATH))
+        except Exception as e:
+            print(f"Memory bank unavailable: {e}")
+            return None
+
+    def has_dm_access(self, user: discord.User, guild_permissions=None):
+        """Return whether a user may read DM-only memory."""
+        if guild_permissions and guild_permissions.administrator:
+            return True
+        character = self.character_map.get(str(user.id), {})
+        return character.get("name", "").lower() == "dm"
+
     async def on_ready(self):
         print(f"Bot is ready. Logged in as {self.user}")
         await self.change_presence(activity=discord.Game(name=config.BOT_ACTIVITY))
@@ -79,6 +111,10 @@ class TranscriberBot(commands.Bot):
         if isinstance(error, commands.CommandNotFound):
             return
         print(f"Command error: {error}")
+
+    async def close(self):
+        await self.voice_handler.disconnect_all()
+        await super().close()
 
 
 def is_ollama_running():
@@ -124,11 +160,21 @@ async def process_recording(filename: str, channel: discord.TextChannel, bot: Tr
             os.makedirs("transcriptions")
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        session_id = timestamp
         transcription_filename = f"transcriptions/transcription_{timestamp}.txt"
+        channel_name = bot.voice_handler.channel_name or getattr(
+            channel,
+            "name",
+            "unknown",
+        )
 
         await channel.send("Recording stopped. Preparing transcription...")
 
-        transcription = bot.transcriber.transcribe_audio(filename)
+        transcription = bot.transcriber.transcribe_audio(
+            filename,
+            session_id=session_id,
+            channel_name=channel_name,
+        )
         enhanced_transcription = bot.transcriber.enhance_transcription(
             transcription, bot.character_map
         )
@@ -162,6 +208,33 @@ async def process_recording(filename: str, channel: discord.TextChannel, bot: Tr
             await channel.send(f"📝 Session notes saved to: `{note_file}`")
 
         guild = channel.guild
+        if bot.memory_bank:
+            try:
+                bot.memory_bank.remember_transcript(
+                    enhanced_transcription,
+                    session_id=session_id,
+                    guild=str(guild.id),
+                    channel_name=channel_name,
+                    note_path=note_file or "",
+                    session_date=timestamp[:10],
+                    visibility=PUBLIC,
+                )
+                if summary.strip():
+                    bot.memory_bank.remember_note(
+                        summary,
+                        session_id=session_id,
+                        summary_text=summary,
+                        guild=str(guild.id),
+                        channel_name=channel_name,
+                        note_path=note_file or "",
+                        session_date=timestamp[:10],
+                        visibility=PUBLIC,
+                    )
+                await channel.send("Campaign memory updated.")
+            except Exception as e:
+                await channel.send(f"Campaign memory update failed: {e}")
+                print(f"Memory bank error: {e}")
+
         guild_id = str(guild.id)
         if guild_id in bot.notes_channel_map:
             channel_id = bot.notes_channel_map[guild_id]
@@ -200,6 +273,16 @@ async def process_recording(filename: str, channel: discord.TextChannel, bot: Tr
 def main():
     bot = TranscriberBot()
 
+    def format_voice_join_error(error):
+        message = str(error)
+        if "4017" in message:
+            return (
+                "Discord rejected the voice connection because this voice channel "
+                "requires E2EE/DAVE support. Update/install dependencies with "
+                "`pip install -r requirements.txt`, then restart the bot."
+            )
+        return f"Failed to join the voice channel: {error}"
+
     @bot.slash_command(
         name="name_me",
         description=("Set the bot's nickname in this server "
@@ -224,25 +307,28 @@ def main():
             )
             return
 
+        await interaction.response.defer()
+
         channel = interaction.user.voice.channel
-        voice_client = await bot.voice_handler.join_voice_channel(channel)
-        bot.current_voice_client = voice_client
+        try:
+            voice_client = await bot.voice_handler.join_voice_channel(channel)
+            bot.current_voice_client = voice_client
+        except Exception as e:
+            await interaction.followup.send(format_voice_join_error(e))
+            return
 
         bot_name = interaction.guild.me.display_name
 
         if voice_client:
-            await interaction.response.send_message(f"{bot_name} joined {channel.name}!")
+            await interaction.followup.send(f"{bot_name} joined {channel.name}!")
         else:
-            await interaction.response.send_message("Failed to join the voice channel.")
+            await interaction.followup.send("Failed to join the voice channel.")
 
     @bot.slash_command(name="leave", description="Leave the voice channel.")
     async def leave_voice(interaction: discord.Interaction):
-        voice_client = bot.current_voice_client or bot.voice_handler.get_voice_client(
-            interaction.guild.id
-        )
-        if voice_client and voice_client.is_connected():
-            await bot.voice_handler.leave_voice_channel(interaction.guild.id)
-            bot.current_voice_client = None
+        left_voice = await bot.voice_handler.leave_voice_channel(interaction.guild.id)
+        bot.current_voice_client = None
+        if left_voice:
             await interaction.response.send_message("Left the voice channel.")
         else:
             await interaction.response.send_message("I'm not currently in a voice channel.")
@@ -259,7 +345,13 @@ def main():
             )
             return
 
-        if bot.voice_handler.start_recording(voice_client):
+        try:
+            recording_started = bot.voice_handler.start_recording(voice_client)
+        except Exception as e:
+            await interaction.response.send_message(f"Failed to start recording: {e}")
+            return
+
+        if recording_started:
             bot_name = interaction.guild.me.display_name
             channel_name = voice_client.channel.name if voice_client.channel else "unknown channel"
             await interaction.response.send_message(f"{bot_name} is now inscribing {channel_name}.")
@@ -274,7 +366,11 @@ def main():
         )
 
         if voice_client and bot.voice_handler.recording:
-            filename = bot.voice_handler.stop_recording()
+            try:
+                filename = bot.voice_handler.stop_recording()
+            except Exception as e:
+                await interaction.followup.send(f"Failed to stop recording cleanly: {e}")
+                return
             if filename:
                 await interaction.followup.send(f"Recording stopped. File saved as: {filename}")
                 await process_recording(filename, interaction.channel, bot)
@@ -357,15 +453,16 @@ def main():
         await interaction.response.defer()
         try:
             if global_sync:
-                synced = await bot.tree.sync()
-                await interaction.followup.send(
-                    f"Globally synced {len(synced)} commands."
-                )
+                await bot.sync_commands()
+                await interaction.followup.send("Globally synced commands.")
             else:
-                synced = await bot.tree.sync(guild=interaction.guild)
-                await interaction.followup.send(
-                    f"Synced {len(synced)} commands for this guild."
-                )
+                guild_ids = config.DISCORD_GUILD_IDS or [interaction.guild.id]
+                try:
+                    await bot.sync_commands(guild_ids=guild_ids)
+                    await interaction.followup.send("Synced commands for this guild.")
+                except TypeError:
+                    await bot.sync_commands()
+                    await interaction.followup.send("Synced commands.")
         except Exception as e:
             await interaction.followup.send(f"Failed to sync commands: {e}")
 
@@ -424,6 +521,125 @@ def main():
                 "Use `/set_notes_channel #channel` to set one.")
             )
 
+    @bot.slash_command(name="remember", description="Recap the last remembered session.")
+    async def remember(interaction: discord.Interaction, include_private: bool = False):
+        if not bot.memory_bank:
+            await interaction.response.send_message(
+                "Campaign memory is not available.",
+                ephemeral=True,
+            )
+            return
+
+        dm_access = (
+            include_private
+            and bot.has_dm_access(interaction.user, interaction.user.guild_permissions)
+        )
+        if include_private and not dm_access:
+            await interaction.response.send_message(
+                "Only the DM or an administrator can include private memory.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            recap = bot.memory_bank.last_session_recap(
+                guild=str(interaction.guild.id),
+                user_id=str(interaction.user.id),
+                dm_access=dm_access,
+            )
+            await interaction.response.send_message(recap, ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Could not build a session recap: {e}",
+                ephemeral=True,
+            )
+
+    @bot.slash_command(name="save_memory", description="Save a campaign memory note.")
+    @option("scope", description="public, character, or dm", required=False)
+    async def save_memory(interaction: discord.Interaction, note: str, scope: str = PUBLIC):
+        if not bot.memory_bank:
+            await interaction.response.send_message(
+                "Campaign memory is not available.",
+                ephemeral=True,
+            )
+            return
+
+        visibility = normalize_visibility(scope)
+        if not visibility:
+            await interaction.response.send_message(
+                "Scope must be public, character, or dm.",
+                ephemeral=True,
+            )
+            return
+
+        dm_access = bot.has_dm_access(interaction.user, interaction.user.guild_permissions)
+        if visibility == DM_ONLY and not dm_access:
+            await interaction.response.send_message(
+                "Only the DM or an administrator can save DM notes.",
+                ephemeral=True,
+            )
+            return
+
+        session_id = f"manual-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+        owner_user_id = str(interaction.user.id) if visibility == CHARACTER else ""
+        try:
+            bot.memory_bank.remember_note(
+                note,
+                session_id=session_id,
+                summary_text=note[:200],
+                guild=str(interaction.guild.id),
+                channel_name=getattr(interaction.channel, "name", "unknown"),
+                visibility=visibility,
+                owner_user_id=owner_user_id,
+            )
+            await interaction.response.send_message("Memory saved.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Could not save memory: {e}",
+                ephemeral=True,
+            )
+
+    @bot.slash_command(name="recall", description="Search campaign memory.")
+    async def recall(
+        interaction: discord.Interaction,
+        query: str,
+        include_private: bool = False,
+    ):
+        if not bot.memory_bank:
+            await interaction.response.send_message(
+                "Campaign memory is not available.",
+                ephemeral=True,
+            )
+            return
+
+        dm_access = (
+            include_private
+            and bot.has_dm_access(interaction.user, interaction.user.guild_permissions)
+        )
+        if include_private and not dm_access:
+            await interaction.response.send_message(
+                "Only the DM or an administrator can search DM notes.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            results = bot.memory_bank.search_accessible(
+                query,
+                user_id=str(interaction.user.id),
+                dm_access=dm_access,
+                guild=str(interaction.guild.id),
+            )
+            await interaction.response.send_message(
+                format_memory_results(results),
+                ephemeral=True,
+            )
+        except Exception as e:
+            await interaction.response.send_message(
+                f"Could not search memory: {e}",
+                ephemeral=True,
+            )
+
     @bot.slash_command(name="help", description="Show the help message for Fly Scribe.")
     async def help_command(interaction: discord.Interaction):
         help_message = (
@@ -442,6 +658,9 @@ def main():
             "- /list_characters - List all assigned characters\n"
             "- /set_notes_channel [#channel] - Set where session notes are posted (admin only)\n"
             "- /get_notes_channel - Show the current notes channel\n"
+            "- /remember - Recap the last remembered session\n"
+            "- /save_memory [note] [scope] - Save campaign memory (public, character, dm)\n"
+            "- /recall [query] - Search campaign memory visible to you\n"
             "- /sync_commands - Sync slash commands (admin only)\n"
             "- /help - Show this help message\n"
         )

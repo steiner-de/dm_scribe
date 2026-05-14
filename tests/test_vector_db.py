@@ -12,8 +12,8 @@ from vector_db import HashingEmbeddingProvider, NomicEmbeddingProvider, VectorDB
 
 
 def db_path():
-    path = Path(__file__).resolve().parents[1] / ".pytest_tmp" / uuid4().hex
-    path.parent.mkdir(exist_ok=True)
+    path = Path(os.environ["TEMP"]) / "dm_scribe_chroma_tests" / uuid4().hex
+    path.mkdir(parents=True, exist_ok=True)
     return path
 
 
