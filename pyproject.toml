@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
     "discord.py>=2.0.0",
     "python-dotenv",
-    "stt",
+    "faster-whisper",
     "pydub",
     "pyaudio",
     "chromadb",
@@ -31,3 +31,11 @@ dev = [
 
 [tool.setuptools]
 packages = ["src"]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W"]
+ignore = ["E203","F401"]
+exclude = ['.git', '__pycache__', 'venv', '.venv']

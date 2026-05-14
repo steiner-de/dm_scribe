@@ -1,6 +1,8 @@
-discord.py>=2.0.0
+py-cord==2.7.2
+pyNaCl==1.6.2
+davey==0.1.5
 python-dotenv
-stt
+faster-whisper
 pydub
 pyaudio
 chromadb
@@ -9,3 +11,4 @@ torch
 einops
 datasets
 accelerate
+requests
