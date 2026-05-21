@@ -317,6 +317,7 @@ def main():
         character_gender: str = None,
     ):
         bot.character_map[str(user.id)] = {
+            "user_handle": user,
             "name": character_name,
             "class": character_class,
             "species": character_species,
@@ -354,7 +355,6 @@ def main():
             )
             return
 
-        await interaction.response.defer()
         try:
             await bot.sync_commands()
         except Exception as e:
@@ -368,11 +368,11 @@ def main():
                 user = bot.get_user(int(handle)) if handle.isdigit() else None
                 display_name = user.mention if user else handle
                 char_list.append(
-                    f"""{display_name}:
+                    f"""{info.get('user_handle','')}: {display_name}
                             {info['name']} (
-                                {info.get('class', 'N/A')},
-                                {info.get('species', 'N/A')},
-                                {info.get('gender', 'N/A')})
+                                character class: {info.get('class', 'N/A')},
+                                character species: {info.get('species', 'N/A')},
+                                character gender: {info.get('gender', 'N/A')})
                     """
                 )
             await interaction.response.send_message(
