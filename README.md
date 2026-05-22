@@ -13,14 +13,15 @@ This Discord bot is designed to join voice channels in Discord servers and trans
 - Persistent character mappings across sessions
 
 ## Requirements
+- UV
 - Python 3.11+
 - Ollama (for local LLM): Download from https://ollama.ai
 - Discord Bot Token (from Discord Developer Portal)
 
 ### Dependencies
-Install Python packages:
-```bash
-pip install -r requirements.txt
+Install UV package manage:
+```
+https://docs.astral.sh/uv/getting-started/installation/
 ```
 
 ### Ollama Setup
