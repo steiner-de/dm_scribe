@@ -70,8 +70,9 @@ class VoiceHandler:
             return None
 
         self.recording = False
-        os.makedirs("recordings", exist_ok=True)
-        final_path = f"recordings/{filename}"
+        recordings_dir = os.path.join("recordings")
+        os.makedirs(recordings_dir, exist_ok=True)
+        final_path = os.path.join(recordings_dir, filename)
 
         with wave.open(final_path, 'wb') as wf:
             wf.setnchannels(CHANNELS)

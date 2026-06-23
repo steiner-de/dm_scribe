@@ -17,7 +17,11 @@ dependencies = [
     "transformers",
     "torch",
     "datasets",
-    "accelerate"
+    "accelerate",
+    "pynacl==1.6.2",
+    "py-cord==2.7.2",
+    "davey==0.1.5",
+    "requests>=2.34.2",
 ]
 
 [project.optional-dependencies]
