@@ -17,6 +17,13 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium,
 # name (see DND_LLM_GUIDE.md / src/package_for_ollama.py) once one exists.
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
 
+# Ollama embedding model used to index/search past session summaries.
+# Pull it once with: ollama pull nomic-embed-text
+OLLAMA_EMBEDDING_MODEL = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+
+# Local, file-based vector store for past session summaries (RAG + /recall).
+VECTOR_STORE_DIR = os.getenv("VECTOR_STORE_DIR", "vector_store")
+
 # Audio settings
 AUDIO_FORMAT = "wav"
 SAMPLE_RATE = 16000

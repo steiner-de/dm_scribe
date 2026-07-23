@@ -96,6 +96,7 @@ notes_channel_map.json
 obsidian_notes/
 recordings/
 transcriptions/
+vector_store/
 
 # LLM fine-tuning data / artifacts (private session content, large model weights)
 training_data/

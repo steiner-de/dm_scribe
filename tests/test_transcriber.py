@@ -82,6 +82,37 @@ def test_summarize_with_llm_returns_response(monkeypatch):
     assert response == "Fake summary"
 
 
+def test_summarize_with_llm_includes_prior_context_when_given(monkeypatch):
+    t = transcriber.Transcriber()
+    captured = {}
+
+    def fake_post(url, json=None, **kwargs):
+        captured["prompt"] = json["prompt"]
+        return DummyResponse(status_code=200)
+
+    monkeypatch.setattr(transcriber.requests, "post", fake_post)
+    t.summarize_with_llm(
+        "Some transcription", {}, prior_context="[2026-06-01] The party met a dragon."
+    )
+
+    assert "Relevant notes from earlier sessions" in captured["prompt"]
+    assert "The party met a dragon." in captured["prompt"]
+
+
+def test_summarize_with_llm_omits_context_block_when_absent(monkeypatch):
+    t = transcriber.Transcriber()
+    captured = {}
+
+    def fake_post(url, json=None, **kwargs):
+        captured["prompt"] = json["prompt"]
+        return DummyResponse(status_code=200)
+
+    monkeypatch.setattr(transcriber.requests, "post", fake_post)
+    t.summarize_with_llm("Some transcription", {})
+
+    assert "Relevant notes from earlier sessions" not in captured["prompt"]
+
+
 def test_summarize_with_llm_handles_errors(monkeypatch):
     t = transcriber.Transcriber()
 

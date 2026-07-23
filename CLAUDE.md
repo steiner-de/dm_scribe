@@ -93,9 +93,18 @@ There is no `pytest-asyncio` dependency. Tests that exercise async code (e.g.
   `ollama create` steps (not automated — depends on llama.cpp, not a project dependency). The
   resulting model becomes a drop-in swap: set `OLLAMA_MODEL=<name>` in `.env` and
   `transcriber.summarize_with_llm` picks it up with no code changes.
+- **`src/vector_store.py`** — `SessionVectorStore` wraps a local, file-based Chroma collection
+  (persisted under `config.VECTOR_STORE_DIR`) with embeddings from Ollama's embedding model
+  (`config.OLLAMA_EMBEDDING_MODEL`, default `nomic-embed-text`). Used two ways from `bot.py`:
+  (1) RAG — `_build_prior_context()` queries it before summarizing so `summarize_with_llm`'s
+  `prior_context` param can give the LLM continuity with past sessions; (2) search — the
+  `/recall` command queries it directly. All entries carry a `guild_id` metadata field and every
+  query filters on it, so one server's session history can't leak into another's. `add_session`/
+  `query` both fail soft (return `False`/`[]`, never raise) so a missing/unreachable Ollama
+  degrades gracefully instead of breaking `/stop`.
 - **`src/config.py`** — all runtime config comes from environment variables (`.env`, loaded by
   `run.py`); see `.env.example` for the full list (`DISCORD_TOKEN`, `WHISPER_MODEL`,
-  `OLLAMA_MODEL`, etc.).
+  `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `VECTOR_STORE_DIR`, etc.).
 
 ### Release process
 
