@@ -61,8 +61,18 @@ class Transcriber:
         minutes, secs = divmod(int(seconds), 60)
         return f"{minutes:02d}:{secs:02d}"
 
-    def summarize_with_llm(self, transcription, character_map):
-        """Use a local LLM via Ollama to summarize the transcription."""
+    def summarize_with_llm(self, transcription, character_map, prior_context=None):
+        """
+        Use a local LLM via Ollama to summarize the transcription.
+
+        Args:
+            transcription: this session's merged, speaker-labeled transcript
+            character_map: character assignment map keyed by discord user id
+            prior_context: optional excerpts from related past sessions
+                (see vector_store.SessionVectorStore.query), injected so the
+                summary can reference established lore/continuity instead of
+                treating every session in isolation
+        """
         try:
             char_info = "\n".join(
                 [
@@ -73,6 +83,11 @@ class Transcriber:
                     for handle, info in character_map.items()
                 ]
             )
+            context_block = (
+                f"\n\nRelevant notes from earlier sessions (for continuity):\n{prior_context}\n"
+                if prior_context
+                else ""
+            )
             prompt = f"""
             Summarize the following D&D session transcription. Focus on:
             - Key events and plot points
@@ -82,7 +97,7 @@ class Transcriber:
 
             Character details:
             {char_info}
-
+            {context_block}
             Transcription: {transcription}
 
             Provide a brief summary, notes on lore/loot, and any memorable quotes.

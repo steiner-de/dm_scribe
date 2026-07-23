@@ -20,6 +20,7 @@ dependencies = [
     "py-cord==2.7.2",
     "davey==0.1.5",
     "requests>=2.34.2",
+    "chromadb>=0.5",
 ]
 
 [project.optional-dependencies]

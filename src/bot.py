@@ -16,6 +16,7 @@ from datetime import datetime
 from voice_handler import VoiceHandler
 from transcriber import Transcriber
 from utils import export_training_data, save_transcript_for_training
+from vector_store import SessionVectorStore
 
 # Configure logging
 if not logging.getLogger().hasHandlers():
@@ -43,6 +44,7 @@ class TranscriberBot:
         self.bot = discord.Bot(intents=intents)
         self.voice_handler = VoiceHandler(self)
         self.transcriber = Transcriber()
+        self.vector_store = SessionVectorStore()
         self.current_voice_client = None
         self.character_map = self.load_character_map()
         self.notes_channel_map = self.load_notes_channel_map()
@@ -193,6 +195,22 @@ class TranscriberBot:
         finally:
             await self.bot.close()
 
+    def _build_prior_context(self, guild_id, transcription, n_results=3):
+        """
+        Retrieve related past session summaries for this guild to give the
+        summarizer continuity across sessions. Returns None (not an empty
+        string) when nothing relevant is found, so the prompt template can
+        omit the context block entirely rather than injecting an empty one.
+        """
+        query_text = transcription[:4000]
+        results = self.vector_store.query(guild_id, query_text, n_results=n_results)
+        if not results:
+            return None
+
+        return "\n\n".join(
+            f"[{meta.get('timestamp', 'unknown date')}] {doc}" for doc, meta in results
+        )
+
     async def process_recording(self, user_files: dict, channel: discord.TextChannel):
         """Handle transcription and summary generation for a saved recording."""
         try:
@@ -232,9 +250,18 @@ class TranscriberBot:
                     )
                     return
 
+            guild = channel.guild
+            prior_context = await loop.run_in_executor(
+                None, self._build_prior_context, guild.id, enhanced_transcription
+            )
+
             await channel.send("Generating summary with LLM...")
             summary = await loop.run_in_executor(
-                None, self.transcriber.summarize_with_llm, enhanced_transcription, self.character_map
+                None,
+                self.transcriber.summarize_with_llm,
+                enhanced_transcription,
+                self.character_map,
+                prior_context,
             )
 
             try:
@@ -251,13 +278,24 @@ class TranscriberBot:
             except Exception as e:
                 logger.error(f"Failed to save training data: {e}")
 
+            characters = [info["name"] for info in self.character_map.values()]
+            await loop.run_in_executor(
+                None,
+                self.vector_store.add_session,
+                guild.id,
+                unique_id,
+                timestamp,
+                channel.name,
+                characters,
+                summary,
+            )
+
             note_file = await loop.run_in_executor(
                 None, self.transcriber.save_obsidian_note, summary, self.character_map
             )
             if note_file:
                 await channel.send(f"📝 Session notes saved to: `{note_file}`")
 
-            guild = channel.guild
             guild_id = str(guild.id)
             if guild_id in self.notes_channel_map:
                 channel_id = self.notes_channel_map[guild_id]
@@ -653,6 +691,34 @@ class TranscriberBot:
                     "Use `/set_notes_channel #channel` to set one.")
                 )
 
+        @self.bot.slash_command(
+            name="recall",
+            description="Semantically search past session summaries for this server.",
+        )
+        @discord.option("query", description="What are you trying to remember?")
+        async def recall(ctx: discord.ApplicationContext, query: str):
+            await ctx.defer()
+            loop = asyncio.get_running_loop()
+            results = await loop.run_in_executor(
+                None, self.vector_store.query, ctx.guild.id, query, 5
+            )
+
+            if not results:
+                await ctx.followup.send(
+                    "No matching sessions found (or the vector store/Ollama isn't reachable)."
+                )
+                return
+
+            chunks = []
+            for doc, meta in results:
+                timestamp = meta.get("timestamp", "unknown date")
+                characters = meta.get("characters") or "unknown characters"
+                chunks.append(f"**{timestamp}** ({characters})\n{doc[:500]}")
+
+            await ctx.followup.send(
+                f"**Sessions matching '{query}':**\n\n" + "\n\n---\n\n".join(chunks)
+            )
+
         @self.bot.slash_command(name="help", description="Show the help message for Fly Scribe.")
         async def help_command(ctx: discord.ApplicationContext):
             help_message = (
@@ -671,6 +737,7 @@ class TranscriberBot:
                 "- /list_characters - List all assigned characters\n"
                 "- /set_notes_channel [#channel] - Set where session notes are posted (admin only)\n"
                 "- /get_notes_channel - Show the current notes channel\n"
+                "- /recall [query] - Semantically search past session summaries\n"
                 "- /export_data - Export session data as LLM fine-tuning pairs (admin only)\n"
                 "- /sync_commands - Sync slash commands (admin only)\n"
                 "- /help - Show this help message\n"
