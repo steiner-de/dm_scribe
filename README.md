@@ -5,10 +5,11 @@ This Discord bot is designed to join voice channels in Discord servers and trans
 
 ## Key Features
 - Join/leave voice channels on command
-- Record audio from voice calls
-- Transcribe recordings using faster-whisper
-- Enhance transcriptions with character names
-- Summarize sessions with local Mistral LLM (lore, loot, events)
+- Record each speaker's audio separately (no diarization needed)
+- Transcribe recordings using faster-whisper, correctly attributed per speaker
+- Summarize sessions with a local LLM via Ollama (lore, loot, events)
+- Recall relevant past sessions during summarization for continuity, and search them
+  on demand with `/recall`
 - Assign character details for better context
 - Persistent character mappings across sessions
 
@@ -26,9 +27,12 @@ https://docs.astral.sh/uv/getting-started/installation/
 
 ### Ollama Setup
 1. Install Ollama from https://ollama.ai
-2. Pull the Mistral model:
+2. Pull the summarization model and the embedding model (the latter powers `/recall`
+   and cross-session continuity — the bot degrades gracefully without it, but those
+   features won't work):
    ```bash
    ollama pull mistral
+   ollama pull nomic-embed-text
    ```
 3. Start the Ollama server:
    ```bash
@@ -38,19 +42,22 @@ https://docs.astral.sh/uv/getting-started/installation/
 
 ## Project Structure
 ```
-discord_video_call_transcriber/
+dm_scribe/
 ├── src/
-│   ├── bot.py              # Main bot logic
-│   ├── voice_handler.py    # Voice connection and audio capture
-│   ├── transcriber.py      # Speech-to-text processing
-│   ├── config.py           # Configuration and secrets
-│   └── utils.py            # Utility functions
+│   ├── bot.py                  # Main bot logic and slash commands
+│   ├── voice_handler.py        # Voice connection and per-speaker audio capture
+│   ├── transcriber.py          # Speech-to-text + LLM summarization
+│   ├── vector_store.py         # Chroma-backed session search/RAG (see DND_LLM_GUIDE.md)
+│   ├── train_llm.py            # LoRA fine-tuning script (see DND_LLM_GUIDE.md)
+│   ├── package_for_ollama.py   # Packages a fine-tuned adapter for Ollama
+│   ├── config.py               # Configuration and secrets
+│   └── utils.py                # Utility functions, training data export
 ├── tests/
-│   └── test_bot.py
 ├── requirements.txt
+├── pyproject.toml
 ├── .gitignore
 ├── README.md
-└── run.py                  # Entry point
+└── run.py                      # Entry point
 ```
 
 ## Implementation Steps
@@ -230,6 +237,7 @@ Once the bot is running and connected to your Discord server, use the following 
 | `/list_characters` | List all assigned player-to-character mappings | `/list_characters` |
 | `/set_notes_channel <channel>` | Set which channel session summaries are posted to (admin only) | `/set_notes_channel #session-notes` |
 | `/get_notes_channel` | Show the current notes channel for this server | `/get_notes_channel` |
+| `/recall <query>` | Semantically search past session summaries for this server | `/recall Who is the dragon cult leader?` |
 | `/export_data` | Export session data as LLM fine-tuning pairs (admin only) | `/export_data` |
 | `/sync_commands` | Re-sync slash commands with Discord (admin only) | `/sync_commands` |
 | `/help` | Show all available commands | `/help` |

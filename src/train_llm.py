@@ -62,7 +62,7 @@ def load_training_dataset(data_path):
         raise FileNotFoundError(
             f"No training data found at '{data_path}'. Run a few sessions with the bot "
             "first, then generate it with: "
-            "python -c \"from utils import export_training_data; export_training_data()\""
+            'python -c "from utils import export_training_data; export_training_data()"'
         )
 
     dataset = load_dataset("json", data_files=data_path, split="train")
@@ -89,9 +89,7 @@ def build_lora_config():
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Fine-tune a local D&D LLM with LoRA/QLoRA."
-    )
+    parser = argparse.ArgumentParser(description="Fine-tune a local D&D LLM with LoRA/QLoRA.")
     parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
     parser.add_argument("--data", default=DEFAULT_DATA_PATH)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)

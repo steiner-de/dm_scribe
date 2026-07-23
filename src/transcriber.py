@@ -44,8 +44,7 @@ class Transcriber:
 
         entries.sort(key=lambda entry: entry[0])
         return "\n".join(
-            f"[{self._format_timestamp(start)}] {label}: {text}"
-            for start, label, text in entries
+            f"[{self._format_timestamp(start)}] {label}: {text}" for start, label, text in entries
         )
 
     @staticmethod
@@ -76,10 +75,12 @@ class Transcriber:
         try:
             char_info = "\n".join(
                 [
-                    (f"{handle}: {info['name']} - "
+                    (
+                        f"{handle}: {info['name']} - "
                         f"Class: {info.get('class', 'Unknown')}, "
                         f"Species: {info.get('species', 'Unknown')}, "
-                        f"Gender: {info.get('gender', 'Unknown')}")
+                        f"Gender: {info.get('gender', 'Unknown')}"
+                    )
                     for handle, info in character_map.items()
                 ]
             )
@@ -138,8 +139,10 @@ class Transcriber:
             # Extract character list from character_map
             characters = "\n".join(
                 [
-                    (f"- **{info['name']}** "
-                     f"({info.get('class', 'Unknown')} {info.get('species', 'Unknown')})")
+                    (
+                        f"- **{info['name']}** "
+                        f"({info.get('class', 'Unknown')} {info.get('species', 'Unknown')})"
+                    )
                     for info in character_map.values()
                 ]
             )

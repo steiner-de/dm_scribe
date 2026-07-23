@@ -21,8 +21,7 @@ from vector_store import SessionVectorStore
 # Configure logging
 if not logging.getLogger().hasHandlers():
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
 logger = logging.getLogger(__name__)
 
@@ -90,7 +89,8 @@ class TranscriberBot:
                 logger.debug(f"Failed to load Opus library {dll_path}: {exc}")
 
         logger.warning(
-            "Opus library is not loaded. Voice support will not work until Opus is installed or available via the py-cord DLL path."
+            "Opus library is not loaded. Voice support will not work until Opus is "
+            "installed or available via the py-cord DLL path."
         )
         return False
 
@@ -165,7 +165,9 @@ class TranscriberBot:
                 except Exception as e:
                     logger.error(f"Error changing nickname in guild {guild.id}: {e}")
 
-    async def on_app_command_error(self, interaction: discord.Interaction, error: discord.DiscordException):
+    async def on_app_command_error(
+        self, interaction: discord.Interaction, error: discord.DiscordException
+    ):
         """Handle errors in slash commands."""
         command_name = getattr(interaction.command, "name", "unknown")
         logger.error(f"Slash command error in {command_name}: {error}", exc_info=error)
@@ -173,7 +175,9 @@ class TranscriberBot:
             if interaction.response.is_done():
                 await interaction.followup.send(f"An error occurred: {error}", ephemeral=True)
             else:
-                await interaction.response.send_message(f"An error occurred: {error}", ephemeral=True)
+                await interaction.response.send_message(
+                    f"An error occurred: {error}", ephemeral=True
+                )
         except Exception as e:
             logger.error(f"Failed to send error message: {e}")
 
@@ -217,7 +221,9 @@ class TranscriberBot:
             loop = asyncio.get_running_loop()
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             unique_id = str(uuid.uuid4())[:8]
-            transcription_filename = os.path.join(TRANSCRIPTIONS_DIR, f"transcription_{timestamp}_{unique_id}.txt")
+            transcription_filename = os.path.join(
+                TRANSCRIPTIONS_DIR, f"transcription_{timestamp}_{unique_id}.txt"
+            )
 
             await channel.send("Recording stopped. Preparing transcription...")
 
@@ -333,12 +339,14 @@ class TranscriberBot:
     def register_commands(self):
         @self.bot.slash_command(
             name="name_me",
-            description=("Set the bot's nickname in this server "
-                         "(used in transcriptions and join messages)."),
+            description=(
+                "Set the bot's nickname in this server "
+                "(used in transcriptions and join messages)."
+            ),
         )
         async def name_me(ctx: discord.ApplicationContext, name: str):
             try:
-                await ctx.guild.me.edit(nick=name) # type: ignore
+                await ctx.guild.me.edit(nick=name)  # type: ignore
                 await ctx.respond(f"Bot name changed to '{name}'!")
             except discord.Forbidden:
                 await ctx.respond("I don't have permission to change my nickname here.")
@@ -366,7 +374,10 @@ class TranscriberBot:
                 await ctx.respond("This command must be used in a server.")
                 return
 
-            if self.voice_handler.get_voice_client(guild.id) and self.voice_handler.get_voice_client(guild.id).is_connected():
+            if (
+                self.voice_handler.get_voice_client(guild.id)
+                and self.voice_handler.get_voice_client(guild.id).is_connected()
+            ):
                 await ctx.respond("I'm already connected to a voice channel in this server.")
                 return
 
@@ -377,7 +388,7 @@ class TranscriberBot:
                 await ctx.respond(f"{bot_name} joined {voice.channel.name}!")
             except discord.errors.ConnectionClosed as e:
                 logger.exception("Failed to join voice channel")
-                if getattr(e, 'code', None) == 4017:
+                if getattr(e, "code", None) == 4017:
                     await ctx.respond(
                         "Failed to join voice: voice websocket closed with code 4017. "
                         "This often means the voice server accepted the handshake but "
@@ -396,7 +407,9 @@ class TranscriberBot:
             if not ctx.guild:
                 await ctx.respond("This command must be used in a guild.")
                 return
-            voice_client = self.current_voice_client or self.voice_handler.get_voice_client(ctx.guild.id)
+            voice_client = self.current_voice_client or self.voice_handler.get_voice_client(
+                ctx.guild.id
+            )
             if voice_client and voice_client.is_connected():
                 await self.voice_handler.leave_voice_channel(ctx.guild.id)
                 self.current_voice_client = None
@@ -404,32 +417,42 @@ class TranscriberBot:
             else:
                 await ctx.respond("I'm not currently in a voice channel.")
 
-        @self.bot.slash_command(name="inscribe", description="Start recording the current voice channel.")
+        @self.bot.slash_command(
+            name="inscribe", description="Start recording the current voice channel."
+        )
         async def inscribe(ctx: discord.ApplicationContext):
             if not ctx.guild:
                 await ctx.respond("This command must be used in a guild.")
                 return
 
-            voice_client = self.current_voice_client or self.voice_handler.get_voice_client(ctx.guild.id)
+            voice_client = self.current_voice_client or self.voice_handler.get_voice_client(
+                ctx.guild.id
+            )
             if voice_client is None or not voice_client.is_connected():
                 await ctx.respond("I need to join a voice channel first. Use /join.")
                 return
 
             if self.voice_handler.start_recording(voice_client):
                 bot_name = ctx.guild.me.display_name if ctx.guild and ctx.guild.me else "Fly Scribe"
-                channel_name = voice_client.channel.name if voice_client.channel else "unknown channel"
+                channel_name = (
+                    voice_client.channel.name if voice_client.channel else "unknown channel"
+                )
                 await ctx.respond(f"{bot_name} is now inscribing {channel_name}.")
             else:
                 await ctx.respond("Already recording.")
 
-        @self.bot.slash_command(name="stop", description="Stop recording and transcribe the session.")
+        @self.bot.slash_command(
+            name="stop", description="Stop recording and transcribe the session."
+        )
         async def stop(ctx: discord.ApplicationContext):
             if not ctx.guild:
                 await ctx.respond("This command must be used in a guild.")
                 return
 
             await ctx.defer()
-            voice_client = self.current_voice_client or self.voice_handler.get_voice_client(ctx.guild.id)
+            voice_client = self.current_voice_client or self.voice_handler.get_voice_client(
+                ctx.guild.id
+            )
 
             if voice_client and self.voice_handler.is_recording(ctx.guild.id):
                 user_files = await self.voice_handler.stop_recording(ctx.guild.id)
@@ -441,7 +464,8 @@ class TranscriberBot:
                         await self.process_recording(user_files, ctx.channel)
                     else:
                         await ctx.followup.send(
-                            "Unable to transcribe because this command was not issued from a text channel."
+                            "Unable to transcribe because this command was not issued "
+                            "from a text channel."
                         )
                 else:
                     await ctx.followup.send("Failed to save recording (no audio captured).")
@@ -466,9 +490,7 @@ class TranscriberBot:
             if self.save_character_map():
                 await ctx.respond(f"Assigned {user.mention} as DM.")
             else:
-                await ctx.respond(
-                    "Assigned DM in memory, but failed to persist the character map."
-                )
+                await ctx.respond("Assigned DM in memory, but failed to persist the character map.")
 
         @self.bot.slash_command(
             name="assign_character",
@@ -548,7 +570,8 @@ class TranscriberBot:
                 await ctx.respond("All character assignments have been removed.")
             else:
                 await ctx.respond(
-                    "Cleared all character assignments in memory, but failed to persist the character map."
+                    "Cleared all character assignments in memory, but failed to "
+                    "persist the character map."
                 )
 
         @self.bot.slash_command(
@@ -597,9 +620,7 @@ class TranscriberBot:
                 await ctx.defer()
             except Exception as e:
                 logger.error(f"Failed to defer sync_commands: {e}")
-                await ctx.respond(
-                    "Failed to start command sync. Please try again.", ephemeral=True
-                )
+                await ctx.respond("Failed to start command sync. Please try again.", ephemeral=True)
                 return
 
             try:
@@ -635,7 +656,8 @@ class TranscriberBot:
 
                 entries.append(
                     f"**{display_name}** - {character_name} \n"
-                    f"Class: {character_class} | Species: {character_species} | Gender: {character_gender}"
+                    f"Class: {character_class} | Species: {character_species} | "
+                    f"Gender: {character_gender}"
                 )
 
             chunks = []
@@ -682,13 +704,13 @@ class TranscriberBot:
                 if channel:
                     await ctx.respond(f"Notes channel: {channel.mention}")
                 else:
-                    await ctx.respond(
-                        "Notes channel is set but no longer exists."
-                    )
+                    await ctx.respond("Notes channel is set but no longer exists.")
             else:
                 await ctx.respond(
-                    ("No notes channel set for this server. "
-                    "Use `/set_notes_channel #channel` to set one.")
+                    (
+                        "No notes channel set for this server. "
+                        "Use `/set_notes_channel #channel` to set one."
+                    )
                 )
 
         @self.bot.slash_command(
@@ -735,7 +757,8 @@ class TranscriberBot:
                 "- /remove_character [user] - Remove a character assignment\n"
                 "- /remove_all_characters - Reset entire character map\n"
                 "- /list_characters - List all assigned characters\n"
-                "- /set_notes_channel [#channel] - Set where session notes are posted (admin only)\n"
+                "- /set_notes_channel [#channel] - Set where session notes are posted "
+                "(admin only)\n"
                 "- /get_notes_channel - Show the current notes channel\n"
                 "- /recall [query] - Semantically search past session summaries\n"
                 "- /export_data - Export session data as LLM fine-tuning pairs (admin only)\n"
@@ -747,6 +770,7 @@ class TranscriberBot:
 
 def is_ollama_running():
     """Check if Ollama server is running without blocking event loop."""
+
     def _check_ollama():
         try:
             response = requests.get(OLLAMA_URL, timeout=OLLAMA_TIMEOUT)
@@ -766,17 +790,19 @@ async def start_ollama_server():
     try:
         if platform.system() == "Windows":
             subprocess.Popen(
-                ["ollama", "serve"], 
-                stdout=subprocess.DEVNULL, 
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == "Windows" else 0
+                ),
             )
         else:
             subprocess.Popen(
-                ["ollama", "serve"], 
-                stdout=subprocess.DEVNULL, 
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
 
         for _ in range(10):
@@ -791,12 +817,14 @@ async def start_ollama_server():
         logger.error(f"Error starting Ollama: {e}")
         return False
 
+
 def main():
     bot = TranscriberBot()
     if config.DISCORD_TOKEN:
         bot.run(config.DISCORD_TOKEN)
     else:
         logger.error("DISCORD_TOKEN not found in environment variables.")
+
 
 if __name__ == "__main__":
     main()

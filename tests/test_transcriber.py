@@ -60,7 +60,9 @@ def test_save_obsidian_note_writes_markdown(tmp_path, monkeypatch):
 
     t = transcriber.Transcriber()
     path = t.save_obsidian_note(
-        "Session summary", {"alice": {"name": "Aria", "class": "Wizard", "species": "Elf"}}, session_name="Test" 
+        "Session summary",
+        {"alice": {"name": "Aria", "class": "Wizard", "species": "Elf"}},
+        session_name="Test",
     )
 
     assert path is not None
