@@ -14,45 +14,59 @@ class Transcriber:
     def __init__(self):
         self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
-    def transcribe_audio(self, audio_file_path, session_id=None, channel_name=None):
+    def transcribe_speakers(self, user_files, character_map, session_id=None, channel_name=None):
         """
-        Transcribe audio file to text using faster-whisper.
+        Transcribe each speaker's isolated audio track and merge the
+        results into one chronological transcript labeled by character
+        name. Speaker attribution comes from Discord's per-user audio
+        streams (see voice_handler.VoiceHandler), not diarization.
 
         Args:
-            audio_file_path: Path to the audio file
+            user_files: {discord_user_id: path_to_wav}
+            character_map: character assignment map keyed by discord user id
             session_id: Optional session identifier for training data
             channel_name: Optional channel name for context
 
         Returns:
-            str: Transcribed text
+            str: merged transcript, one line per speech segment, sorted by
+                 time and labeled with the speaker's character name
         """
-        try:
-            segments, info = self.model.transcribe(audio_file_path, beam_size=5)
-            text = " ".join([segment.text for segment in segments])
+        entries = []
+        for user_id, path in user_files.items():
+            label = self._label_for_user(user_id, character_map)
+            try:
+                segments, _ = self.model.transcribe(path, beam_size=5)
+            except Exception as e:
+                logging.error(f"Transcription error for {path}: {e}")
+                continue
+            for segment in segments:
+                text = segment.text.strip()
+                if text:
+                    entries.append((segment.start, label, text))
 
-            # Save for training if session info provided
-            if session_id and text.strip():
-                save_transcript_for_training(text, session_id, channel_name or "unknown")
+        entries.sort(key=lambda entry: entry[0])
+        transcript = "\n".join(
+            f"[{self._format_timestamp(start)}] {label}: {text}"
+            for start, label, text in entries
+        )
 
-            return text
-        except Exception as e:
-            logging.error(f"Transcription error: {e}")
-            return ""
+        if session_id and transcript.strip():
+            save_transcript_for_training(transcript, session_id, channel_name or "unknown")
 
-    def process_audio_chunk(self, audio_chunk, session_id=None, channel_name=None):
-        """Process a chunk of audio data."""
-        return self.transcribe_audio(audio_chunk, session_id, channel_name)
+        return transcript
 
-    def enhance_transcription(self, transcription, character_map):
-        """Enhance transcription by replacing speaker names with character names."""
-        # This is a simple placeholder; in reality, you'd need speaker diarization
-        # For now, assume the transcription is dialogue and replace known names
-        enhanced = transcription
-        for discord_handle, info in character_map.items():
-            character_name = info.get("name", discord_handle)
-            # Replace mentions of discord_handle with character name
-            enhanced = enhanced.replace(discord_handle, character_name)
-        return enhanced
+    @staticmethod
+    def _label_for_user(user_id, character_map):
+        """Resolve a Discord user ID to their assigned character name."""
+        info = character_map.get(str(user_id))
+        if info:
+            return info.get("name", str(user_id))
+        return f"User {user_id}"
+
+    @staticmethod
+    def _format_timestamp(seconds):
+        minutes, secs = divmod(int(seconds), 60)
+        return f"{minutes:02d}:{secs:02d}"
 
     def summarize_with_llm(self, transcription, character_map):
         """Use local Mistral 7B via Ollama to summarize the transcription."""
