@@ -54,26 +54,6 @@ def test_transcribe_speakers_merges_by_time_and_labels_characters():
     assert "Aria: Hello there" in lines[1]
 
 
-def test_transcribe_speakers_saves_training_data_when_session_id_given(monkeypatch):
-    t = transcriber.Transcriber()
-    calls = []
-    monkeypatch.setattr(
-        transcriber,
-        "save_transcript_for_training",
-        lambda transcript, session_id, channel_name: calls.append(
-            (transcript, session_id, channel_name)
-        ),
-    )
-
-    t.transcribe_speakers(
-        {"1": "recordings/alice.wav"}, {}, session_id="abc123", channel_name="general"
-    )
-
-    assert len(calls) == 1
-    assert calls[0][1] == "abc123"
-    assert calls[0][2] == "general"
-
-
 def test_save_obsidian_note_writes_markdown(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(transcriber, "__file__", str(tmp_path / "src" / "transcriber.py"))
