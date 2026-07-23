@@ -390,7 +390,7 @@ class TranscriberBot:
             await ctx.defer()
             voice_client = self.current_voice_client or self.voice_handler.get_voice_client(ctx.guild.id)
 
-            if voice_client and self.voice_handler.recording:
+            if voice_client and self.voice_handler.is_recording(ctx.guild.id):
                 user_files = await self.voice_handler.stop_recording(ctx.guild.id)
                 if user_files:
                     await ctx.followup.send(
