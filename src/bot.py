@@ -46,6 +46,8 @@ class TranscriberBot:
         self.character_map = self.load_character_map()
         self.notes_channel_map = self.load_notes_channel_map()
 
+        self.ensure_opus_loaded()
+
         for directory in [OBSIDIAN_NOTES_DIR, TRANSCRIPTIONS_DIR]:
             os.makedirs(directory, exist_ok=True)
 
@@ -55,6 +57,39 @@ class TranscriberBot:
 
     def run(self, token: str):
         self.bot.run(token)
+
+    def ensure_opus_loaded(self) -> bool:
+        """Ensure the Opus library is loaded for voice support."""
+        if discord.opus.is_loaded():
+            return True
+
+        for lib_name in ("libopus-0.dll", "opus.dll", "libopus.dll"):
+            try:
+                discord.opus.load_opus(lib_name)
+                logger.info(f"Loaded Opus library: {lib_name}")
+                return True
+            except Exception as exc:
+                logger.debug(f"Failed to load Opus library {lib_name}: {exc}")
+
+        discord_root = os.path.dirname(discord.__file__)
+        dll_paths = [
+            os.path.join(discord_root, "bin", "libopus-0.x64.dll"),
+            os.path.join(discord_root, "bin", "libopus-0.x86.dll"),
+        ]
+        for dll_path in dll_paths:
+            if not os.path.exists(dll_path):
+                continue
+            try:
+                discord.opus.load_opus(dll_path)
+                logger.info(f"Loaded Opus library from path: {dll_path}")
+                return True
+            except Exception as exc:
+                logger.debug(f"Failed to load Opus library {dll_path}: {exc}")
+
+        logger.warning(
+            "Opus library is not loaded. Voice support will not work until Opus is installed or available via the py-cord DLL path."
+        )
+        return False
 
     def load_character_map(self):
         """Load character map from file."""
@@ -157,7 +192,7 @@ class TranscriberBot:
         finally:
             await self.bot.close()
 
-    async def process_recording(self, filename: str, channel: discord.TextChannel):
+    async def process_recording(self, user_files: dict, channel: discord.TextChannel):
         """Handle transcription and summary generation for a saved recording."""
         try:
             loop = asyncio.get_running_loop()
@@ -167,12 +202,18 @@ class TranscriberBot:
 
             await channel.send("Recording stopped. Preparing transcription...")
 
-            transcription = await loop.run_in_executor(
-                None, self.transcriber.transcribe_audio, filename
-            )
             enhanced_transcription = await loop.run_in_executor(
-                None, self.transcriber.enhance_transcription, transcription, self.character_map
+                None,
+                self.transcriber.transcribe_speakers,
+                user_files,
+                self.character_map,
+                unique_id,
+                channel.name,
             )
+
+            if not enhanced_transcription.strip():
+                await channel.send("No speech was detected in the recording.")
+                return
 
             try:
                 with open(transcription_filename, "w", encoding="utf-8") as f:
@@ -238,7 +279,7 @@ class TranscriberBot:
 
             await channel.send(
                 f"✅ Session complete!\n\n"
-                f"📁 Recording saved to: `{filename}`\n"
+                f"🎙️ Recorded {len(user_files)} speaker track(s)\n"
                 f"📄 Transcription saved to: `{transcription_filename}`\n\n"
                 f"**Transcription:**\n{enhanced_transcription[:1000]}...\n\n"
                 f"**Summary:**\n{summary}"
@@ -256,7 +297,7 @@ class TranscriberBot:
         )
         async def name_me(ctx: discord.ApplicationContext, name: str):
             try:
-                await ctx.guild.me.edit(nick=name)
+                await ctx.guild.me.edit(nick=name) # type: ignore
                 await ctx.respond(f"Bot name changed to '{name}'!")
             except discord.Forbidden:
                 await ctx.respond("I don't have permission to change my nickname here.")
@@ -265,19 +306,48 @@ class TranscriberBot:
 
         @self.bot.slash_command(name="join", description="Join the voice channel you are in.")
         async def join(ctx: discord.ApplicationContext):
-            voice = getattr(ctx.user, "voice", None)
+            if not self.ensure_opus_loaded():
+                await ctx.respond(
+                    "Voice cannot connect because the Opus library is not loaded. "
+                    "Install a compatible Opus library and restart the bot."
+                )
+                return
+
+            member = getattr(ctx, "author", None) or getattr(ctx, "user", None)
+            voice = getattr(member, "voice", None)
 
             if not voice or not getattr(voice, "channel", None):
                 await ctx.respond("Buzz-Buzz, You aren't in a voice channel!")
                 return
 
+            guild = ctx.guild
+            if guild is None:
+                await ctx.respond("This command must be used in a server.")
+                return
+
+            if self.voice_handler.get_voice_client(guild.id) and self.voice_handler.get_voice_client(guild.id).is_connected():
+                await ctx.respond("I'm already connected to a voice channel in this server.")
+                return
+
             try:
-                voice_client = await voice.channel.connect()
-                channel = voice.channel
+                voice_client = await self.voice_handler.join_voice_channel(voice.channel)
                 self.current_voice_client = voice_client
-                bot_name = ctx.guild.me.display_name if ctx.guild and ctx.guild.me else "Fly Scribe"
-                await ctx.respond(f"{bot_name} joined {channel.name}!")
+                bot_name = guild.me.display_name if guild.me else "Fly Scribe"
+                await ctx.respond(f"{bot_name} joined {voice.channel.name}!")
+            except discord.errors.ConnectionClosed as e:
+                logger.exception("Failed to join voice channel")
+                if getattr(e, 'code', None) == 4017:
+                    await ctx.respond(
+                        "Failed to join voice: voice websocket closed with code 4017. "
+                        "This often means the voice server accepted the handshake but "
+                        "the voice session could not be established. "
+                        "Check that the bot has CONNECT/SPEAK permissions and that "
+                        "outbound UDP to Discord voice servers is allowed."
+                    )
+                else:
+                    await ctx.respond(f"Failed to join the voice channel: {e}")
             except Exception as e:
+                logger.exception("Failed to join voice channel")
                 await ctx.respond(f"Failed to join the voice channel: {e}")
 
         @self.bot.slash_command(name="leave", description="Leave the voice channel.")
@@ -321,17 +391,19 @@ class TranscriberBot:
             voice_client = self.current_voice_client or self.voice_handler.get_voice_client(ctx.guild.id)
 
             if voice_client and self.voice_handler.recording:
-                filename = self.voice_handler.stop_recording()
-                if filename:
-                    await ctx.followup.send(f"Recording stopped. File saved as: {filename}")
+                user_files = await self.voice_handler.stop_recording(ctx.guild.id)
+                if user_files:
+                    await ctx.followup.send(
+                        f"Recording stopped. Captured {len(user_files)} speaker track(s)."
+                    )
                     if isinstance(ctx.channel, discord.TextChannel):
-                        await self.process_recording(filename, ctx.channel)
+                        await self.process_recording(user_files, ctx.channel)
                     else:
                         await ctx.followup.send(
                             "Unable to transcribe because this command was not issued from a text channel."
                         )
                 else:
-                    await ctx.followup.send("Failed to save recording.")
+                    await ctx.followup.send("Failed to save recording (no audio captured).")
             else:
                 await ctx.followup.send("I am not currently recording in this voice channel.")
 
@@ -361,14 +433,19 @@ class TranscriberBot:
             name="assign_character",
             description="Assign a character name to a Discord user for transcription enhancement.",
         )
+        @discord.option("character_name", description="Character name")
+        @discord.option("character_class", description="Character class")
+        @discord.option("character_species", description="Character species")
+        @discord.option("character_gender", description="Character gender")
+        @discord.option("character_age", description="Character age", required=False)
         async def assign_character(
             ctx: discord.ApplicationContext,
             user: discord.User,
             character_name: str,
-            character_class: str = discord.Option(str, "Character class"),
-            character_species: str = discord.Option(str, "Character species"),
-            character_gender: str = discord.Option(str, "Character gender"),
-            character_age: int = discord.Option(int, "Character age", required=False),
+            character_class: str,
+            character_species: str,
+            character_gender: str,
+            character_age: int = 0,
         ):
             user_id = str(user.id)
             self.character_map[user_id] = {

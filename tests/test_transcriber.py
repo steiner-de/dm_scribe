@@ -3,11 +3,24 @@ import pytest
 import transcriber
 
 
+class DummySegment:
+    def __init__(self, start, text):
+        self.start = start
+        self.text = text
+
+
 class DummyModel:
     def __init__(self, *args, **kwargs):
         pass
 
     def transcribe(self, audio_file_path, beam_size=5):
+        responses = {
+            "alice.wav": [DummySegment(5.0, "Hello there")],
+            "bob.wav": [DummySegment(1.0, "Hi Alice")],
+        }
+        for suffix, segments in responses.items():
+            if audio_file_path.endswith(suffix):
+                return segments, {}
         return [], {}
 
 
@@ -26,14 +39,39 @@ def patch_whisper_model(monkeypatch):
     yield
 
 
-def test_enhance_transcription_replaces_handles():
+def test_transcribe_speakers_merges_by_time_and_labels_characters():
     t = transcriber.Transcriber()
-    transcription = "Alice says hello to Bob."
-    character_map = {"Alice": {"name": "Aria"}}
+    user_files = {"1": "recordings/alice.wav", "2": "recordings/bob.wav"}
+    character_map = {"1": {"name": "Aria"}}
 
-    result = t.enhance_transcription(transcription, character_map)
+    result = t.transcribe_speakers(user_files, character_map)
+    lines = result.split("\n")
 
-    assert "Aria says hello to Bob." in result
+    assert len(lines) == 2
+    # Bob's segment starts earlier (1.0s) than Alice's (5.0s), despite being
+    # listed second in user_files, so it should be merged in first.
+    assert "User 2: Hi Alice" in lines[0]
+    assert "Aria: Hello there" in lines[1]
+
+
+def test_transcribe_speakers_saves_training_data_when_session_id_given(monkeypatch):
+    t = transcriber.Transcriber()
+    calls = []
+    monkeypatch.setattr(
+        transcriber,
+        "save_transcript_for_training",
+        lambda transcript, session_id, channel_name: calls.append(
+            (transcript, session_id, channel_name)
+        ),
+    )
+
+    t.transcribe_speakers(
+        {"1": "recordings/alice.wav"}, {}, session_id="abc123", channel_name="general"
+    )
+
+    assert len(calls) == 1
+    assert calls[0][1] == "abc123"
+    assert calls[0][2] == "general"
 
 
 def test_save_obsidian_note_writes_markdown(tmp_path, monkeypatch):

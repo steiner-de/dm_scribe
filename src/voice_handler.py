@@ -1,12 +1,23 @@
 """
 Handles voice channel connections and audio capture using py-cord.
-Streaming audio directly to file with minimal memory overhead.
+
+Recording uses py-cord's Sink API, which gives each speaker their own
+audio track (keyed by Discord user ID) rather than mixing everyone down
+into a single file. That per-speaker separation is what lets transcripts
+be attributed to the correct character without needing diarization.
 """
 
-import discord
-import wave
+import asyncio
+import logging
 import os
-from config import SAMPLE_RATE, CHANNELS
+from datetime import datetime
+
+import discord
+from discord.sinks import RecordingException, WaveSink
+
+logger = logging.getLogger(__name__)
+
+RECORDINGS_DIR = "recordings"
 
 
 class VoiceHandler:
@@ -14,14 +25,21 @@ class VoiceHandler:
         self.bot = bot
         self.voice_clients = {}
         self.recording = False
-        self.audio_frames = []
-        self.voice_client = None
         self.channel_name = None
+        self._finished_futures = {}
 
     async def join_voice_channel(self, channel: discord.VoiceChannel):
         """Join a voice channel using py-cord."""
-        if channel.guild.id in self.voice_clients:
-            return self.voice_clients[channel.guild.id]
+        guild_id = channel.guild.id
+        existing = self.voice_clients.get(guild_id)
+        if existing:
+            if existing.is_connected():
+                return existing
+            try:
+                await existing.disconnect()
+            except Exception:
+                pass
+            del self.voice_clients[guild_id]
 
         voice_client = await channel.connect()
         self.channel_name = channel.name
@@ -29,7 +47,7 @@ class VoiceHandler:
         if not voice_client.is_connected():
             raise Exception("Failed to connect to voice channel")
 
-        self.voice_clients[channel.guild.id] = voice_client
+        self.voice_clients[guild_id] = voice_client
         return voice_client
 
     async def leave_voice_channel(self, guild_id):
@@ -42,42 +60,72 @@ class VoiceHandler:
         """Get the voice client for a guild."""
         return self.voice_clients.get(guild_id)
 
-
-
-    def start_recording(self, voice_client):
-        # Async method description to record audio from the voice client
-        @voice_client.listen(discord.sink)
-        async def on_audio_packet(self, packet):
-            """Handle incoming audio packets."""
-            if self.recording:
-                # Add audio chunks to frames list
-                self.audio_frames.append(packet.data) 
-        """Start recording audio from the voice client."""
+    def start_recording(self, voice_client) -> bool:
+        """
+        Start recording the voice channel, capturing each speaker's audio
+        on its own track via py-cord's Sink API.
+        """
         if self.recording:
             return False
 
+        guild_id = voice_client.channel.guild.id
+        self.channel_name = voice_client.channel.name
+
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+        self._finished_futures[guild_id] = future
+
+        try:
+            voice_client.start_recording(
+                WaveSink(), self._on_recording_finished, guild_id, sync_start=True
+            )
+        except RecordingException as e:
+            logger.error(f"Failed to start recording: {e}")
+            del self._finished_futures[guild_id]
+            return False
+
         self.recording = True
-        self.audio_frames = []
-        self.voice_client = voice_client
-        voice_client.listen(discord.sinks.WaveSink(sample_rate=16000,
-                                                   channels=self.channel_name))
-        os.makedirs("recordings", exist_ok=True)
         return True
 
-    def stop_recording(self, filename="recording.wav"):
-        """Stop recording and save the file."""
-        if not self.recording:
-            return None
+    async def _on_recording_finished(self, sink, guild_id):
+        """
+        py-cord invokes this once every speaker's audio has been flushed
+        after stop_recording(). Writes one WAV file per speaker to disk.
+        """
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+        user_files = {}
+        for user_id, audio in sink.audio_data.items():
+            path = os.path.join(RECORDINGS_DIR, f"{guild_id}_{timestamp}_{user_id}.wav")
+            try:
+                with open(path, "wb") as f:
+                    f.write(audio.file.read())
+                user_files[str(user_id)] = path
+            except OSError as e:
+                logger.error(f"Failed to save recording for user {user_id}: {e}")
+
+        future = self._finished_futures.pop(guild_id, None)
+        if future and not future.done():
+            future.set_result(user_files)
+
+    async def stop_recording(self, guild_id) -> dict:
+        """
+        Stop recording and wait for py-cord to flush each speaker's audio
+        to disk.
+
+        Returns:
+            dict: {discord_user_id (str): wav_file_path}
+        """
+        voice_client = self.voice_clients.get(guild_id)
+        if not self.recording or voice_client is None or not voice_client.recording:
+            self.recording = False
+            return {}
+
+        future = self._finished_futures.get(guild_id)
+        voice_client.stop_recording()
         self.recording = False
-        recordings_dir = os.path.join("recordings")
-        os.makedirs(recordings_dir, exist_ok=True)
-        final_path = os.path.join(recordings_dir, filename)
 
-        with wave.open(final_path, 'wb') as wf:
-            wf.setnchannels(CHANNELS)
-            wf.setsampwidth(2)
-            wf.setframerate(SAMPLE_RATE)
-            wf.writeframes(b"".join(self.audio_frames))
-
-        return final_path
+        if future is None:
+            return {}
+        return await future
