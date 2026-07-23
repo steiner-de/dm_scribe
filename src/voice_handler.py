@@ -24,7 +24,7 @@ class VoiceHandler:
     def __init__(self, bot):
         self.bot = bot
         self.voice_clients = {}
-        self.recording = False
+        self.recording_guilds = set()
         self.channel_name = None
         self._finished_futures = {}
 
@@ -51,7 +51,10 @@ class VoiceHandler:
         return voice_client
 
     async def leave_voice_channel(self, guild_id):
-        """Leave a voice channel."""
+        """Leave a voice channel, flushing any in-progress recording first
+        so speaker audio is written to disk instead of orphaned mid-sink."""
+        if guild_id in self.recording_guilds:
+            await self.stop_recording(guild_id)
         if guild_id in self.voice_clients:
             await self.voice_clients[guild_id].disconnect()
             del self.voice_clients[guild_id]
@@ -60,15 +63,19 @@ class VoiceHandler:
         """Get the voice client for a guild."""
         return self.voice_clients.get(guild_id)
 
+    def is_recording(self, guild_id) -> bool:
+        """Whether the given guild currently has an active recording."""
+        return guild_id in self.recording_guilds
+
     def start_recording(self, voice_client) -> bool:
         """
         Start recording the voice channel, capturing each speaker's audio
         on its own track via py-cord's Sink API.
         """
-        if self.recording:
+        guild_id = voice_client.channel.guild.id
+        if guild_id in self.recording_guilds:
             return False
 
-        guild_id = voice_client.channel.guild.id
         self.channel_name = voice_client.channel.name
 
         loop = asyncio.get_event_loop()
@@ -84,7 +91,7 @@ class VoiceHandler:
             del self._finished_futures[guild_id]
             return False
 
-        self.recording = True
+        self.recording_guilds.add(guild_id)
         return True
 
     async def _on_recording_finished(self, sink, guild_id):
@@ -118,13 +125,18 @@ class VoiceHandler:
             dict: {discord_user_id (str): wav_file_path}
         """
         voice_client = self.voice_clients.get(guild_id)
-        if not self.recording or voice_client is None or not voice_client.recording:
-            self.recording = False
+        not_recording = (
+            guild_id not in self.recording_guilds
+            or voice_client is None
+            or not voice_client.recording
+        )
+        if not_recording:
+            self.recording_guilds.discard(guild_id)
             return {}
 
         future = self._finished_futures.get(guild_id)
         voice_client.stop_recording()
-        self.recording = False
+        self.recording_guilds.discard(guild_id)
 
         if future is None:
             return {}
