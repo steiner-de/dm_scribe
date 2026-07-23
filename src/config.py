@@ -34,6 +34,7 @@ DEFAULT_TEXT_CHANNEL = os.getenv("DEFAULT_TEXT_CHANNEL_ID")
 
 # Bot settings
 COMMAND_PREFIX = "!"
-BOT_ACTIVITY = ("Fly Scribe: A fly-on-the-wall voice transcriber, "
-                    "note keeper, and lore builder for D&D sessions"
-                )
+BOT_ACTIVITY = (
+    "Fly Scribe: A fly-on-the-wall voice transcriber, "
+    "note keeper, and lore builder for D&D sessions"
+)
