@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 from voice_handler import VoiceHandler
 from transcriber import Transcriber
+from utils import export_training_data, save_transcript_for_training
 
 # Configure logging
 if not logging.getLogger().hasHandlers():
@@ -203,12 +204,7 @@ class TranscriberBot:
             await channel.send("Recording stopped. Preparing transcription...")
 
             enhanced_transcription = await loop.run_in_executor(
-                None,
-                self.transcriber.transcribe_speakers,
-                user_files,
-                self.character_map,
-                unique_id,
-                channel.name,
+                None, self.transcriber.transcribe_speakers, user_files, self.character_map
             )
 
             if not enhanced_transcription.strip():
@@ -247,6 +243,13 @@ class TranscriberBot:
             except IOError as e:
                 logger.error(f"Failed to append summary to file: {e}")
                 await channel.send(f"Warning: Could not save summary to file: {e}")
+
+            try:
+                save_transcript_for_training(
+                    enhanced_transcription, summary, unique_id, channel.name
+                )
+            except Exception as e:
+                logger.error(f"Failed to save training data: {e}")
 
             note_file = await loop.run_in_executor(
                 None, self.transcriber.save_obsidian_note, summary, self.character_map
@@ -511,6 +514,39 @@ class TranscriberBot:
                 )
 
         @self.bot.slash_command(
+            name="export_data",
+            description=(
+                "Export collected session transcripts+summaries as instruction/response "
+                "training pairs for LLM fine-tuning (admin only)."
+            ),
+        )
+        async def export_data(ctx: discord.ApplicationContext):
+            if not ctx.user.guild_permissions.administrator:
+                await ctx.respond("You need administrator permissions to export training data.")
+                return
+
+            await ctx.defer(ephemeral=True)
+            loop = asyncio.get_running_loop()
+            try:
+                output_path = await loop.run_in_executor(None, export_training_data)
+            except Exception as e:
+                logger.error(f"Failed to export training data: {e}")
+                await ctx.followup.send(f"Failed to export training data: {e}", ephemeral=True)
+                return
+
+            if output_path:
+                await ctx.followup.send(
+                    f"Training data exported to `{output_path}`. "
+                    "See DND_LLM_GUIDE.md for how to use it with train_llm.py.",
+                    ephemeral=True,
+                )
+            else:
+                await ctx.followup.send(
+                    "No training data found yet — run a few sessions with /stop first.",
+                    ephemeral=True,
+                )
+
+        @self.bot.slash_command(
             name="sync_commands",
             description="Sync slash commands (admin only).",
         )
@@ -635,6 +671,7 @@ class TranscriberBot:
                 "- /list_characters - List all assigned characters\n"
                 "- /set_notes_channel [#channel] - Set where session notes are posted (admin only)\n"
                 "- /get_notes_channel - Show the current notes channel\n"
+                "- /export_data - Export session data as LLM fine-tuning pairs (admin only)\n"
                 "- /sync_commands - Sync slash commands (admin only)\n"
                 "- /help - Show this help message\n"
             )

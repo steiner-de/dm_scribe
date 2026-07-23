@@ -9,11 +9,9 @@ description = "Discord bot for transcribing voice calls in D&D sessions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "discord.py>=2.0.0",
     "python-dotenv",
     "faster-whisper",
     "pydub",
-    "pyaudio",
     "transformers",
     "torch",
     "datasets",
@@ -29,6 +27,13 @@ dev = [
     "pytest",
     "black",
     "flake8"
+]
+# Only needed to run train_llm.py / package_for_ollama.py, not the bot itself.
+# Requires a CUDA GPU; see DND_LLM_GUIDE.md.
+train = [
+    "peft>=0.11",
+    "bitsandbytes>=0.43",
+    "trl>=0.9",
 ]
 
 [tool.setuptools]

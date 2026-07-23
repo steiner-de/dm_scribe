@@ -94,6 +94,13 @@ venv.bak/
 character_map.json
 notes_channel_map.json
 obsidian_notes/
+recordings/
+transcriptions/
+
+# LLM fine-tuning data / artifacts (private session content, large model weights)
+training_data/
+exported_training_data.jsonl
+models/
 
 # Spyder project settings
 .spyderproject

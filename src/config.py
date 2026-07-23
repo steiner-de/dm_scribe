@@ -13,6 +13,10 @@ TRANSCRIPTION_SERVICE = os.getenv(
 )  # 'faster-whisper', 'google', etc.
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny, base, small, medium, large
 
+# Ollama model used for session summarization. Swap to a fine-tuned model's
+# name (see DND_LLM_GUIDE.md / src/package_for_ollama.py) once one exists.
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
+
 # Audio settings
 AUDIO_FORMAT = "wav"
 SAMPLE_RATE = 16000

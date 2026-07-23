@@ -3,8 +3,8 @@ Handles speech-to-text transcription.
 """
 
 from faster_whisper import WhisperModel
-from config import WHISPER_MODEL
-from utils import save_transcript_for_training, logging
+from config import OLLAMA_MODEL, WHISPER_MODEL
+from utils import logging
 import requests
 from datetime import datetime
 import os
@@ -14,7 +14,7 @@ class Transcriber:
     def __init__(self):
         self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
-    def transcribe_speakers(self, user_files, character_map, session_id=None, channel_name=None):
+    def transcribe_speakers(self, user_files, character_map):
         """
         Transcribe each speaker's isolated audio track and merge the
         results into one chronological transcript labeled by character
@@ -24,8 +24,6 @@ class Transcriber:
         Args:
             user_files: {discord_user_id: path_to_wav}
             character_map: character assignment map keyed by discord user id
-            session_id: Optional session identifier for training data
-            channel_name: Optional channel name for context
 
         Returns:
             str: merged transcript, one line per speech segment, sorted by
@@ -45,15 +43,10 @@ class Transcriber:
                     entries.append((segment.start, label, text))
 
         entries.sort(key=lambda entry: entry[0])
-        transcript = "\n".join(
+        return "\n".join(
             f"[{self._format_timestamp(start)}] {label}: {text}"
             for start, label, text in entries
         )
-
-        if session_id and transcript.strip():
-            save_transcript_for_training(transcript, session_id, channel_name or "unknown")
-
-        return transcript
 
     @staticmethod
     def _label_for_user(user_id, character_map):
@@ -69,14 +62,14 @@ class Transcriber:
         return f"{minutes:02d}:{secs:02d}"
 
     def summarize_with_llm(self, transcription, character_map):
-        """Use local Mistral 7B via Ollama to summarize the transcription."""
+        """Use a local LLM via Ollama to summarize the transcription."""
         try:
             char_info = "\n".join(
                 [
                     (f"{handle}: {info['name']} - "
-                        "Class: {info.get('class', 'Unknown')}, "
-                        "Species: {info.get('species', 'Unknown')}, "
-                        "Gender: {info.get('gender', 'Unknown')}")
+                        f"Class: {info.get('class', 'Unknown')}, "
+                        f"Species: {info.get('species', 'Unknown')}, "
+                        f"Gender: {info.get('gender', 'Unknown')}")
                     for handle, info in character_map.items()
                 ]
             )
@@ -96,7 +89,7 @@ class Transcriber:
             """
             response = requests.post(
                 "http://localhost:11434/api/generate",
-                json={"model": "mistral", "prompt": prompt, "stream": False},
+                json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
             )
             if response.status_code == 200:
                 return response.json()["response"]

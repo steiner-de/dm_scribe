@@ -33,8 +33,19 @@ def get_user_display_name(user):
     return user.display_name if hasattr(user, "display_name") else str(user)
 
 
-def save_transcript_for_training(transcript, session_id, channel_name):
-    """Save transcript data for LLM training."""
+SUMMARIZATION_INSTRUCTION = (
+    "Summarize the following D&D session transcript. Focus on key events and plot "
+    "points, lore and world-building details, loot and items acquired, and character "
+    "actions and decisions."
+)
+
+
+def save_transcript_for_training(transcript, summary, session_id, channel_name):
+    """Save a transcript + its summary as a training example for fine-tuning.
+
+    Storing both (rather than just the transcript) is what lets
+    export_training_data() build instruction/response pairs later.
+    """
     data_dir = os.path.join(os.path.dirname(__file__), "..", "training_data")
     os.makedirs(data_dir, exist_ok=True)
 
@@ -43,6 +54,7 @@ def save_transcript_for_training(transcript, session_id, channel_name):
         "channel": channel_name,
         "timestamp": format_timestamp(),
         "transcript": sanitize_text(transcript),
+        "summary": sanitize_text(summary),
         "source": "discord_voice_call",
     }
 
@@ -56,7 +68,13 @@ def save_transcript_for_training(transcript, session_id, channel_name):
 
 
 def export_training_data(output_path=None):
-    """Export all collected training data to a single file for LLM repo."""
+    """
+    Export collected session transcripts as instruction/response pairs
+    (see DND_LLM_GUIDE.md) ready for train_llm.py.
+
+    Records saved before summary capture was added (no "summary" field) are
+    skipped, since they can't form a valid instruction/response pair.
+    """
     data_dir = os.path.join(os.path.dirname(__file__), "..", "training_data")
     if not os.path.exists(data_dir):
         logging.warning("No training data directory found")
@@ -65,15 +83,32 @@ def export_training_data(output_path=None):
     if output_path is None:
         output_path = os.path.join(os.path.dirname(__file__), "..", "exported_training_data.jsonl")
 
+    written = 0
+    skipped = 0
     with open(output_path, "w") as outfile:
-        for filename in os.listdir(data_dir):
-            if filename.endswith(".json"):
-                filepath = os.path.join(data_dir, filename)
-                with open(filepath, "r") as infile:
-                    data = json.load(infile)
-                    # Convert to JSON Lines format for training
-                    json.dump(data, outfile)
-                    outfile.write("\n")
+        for filename in sorted(os.listdir(data_dir)):
+            if not filename.endswith(".json"):
+                continue
+            filepath = os.path.join(data_dir, filename)
+            with open(filepath, "r") as infile:
+                data = json.load(infile)
 
-    logging.info(f"Exported training data to: {output_path}")
+            summary = data.get("summary")
+            transcript = data.get("transcript")
+            if not summary or not transcript:
+                skipped += 1
+                continue
+
+            example = {
+                "instruction": f"{SUMMARIZATION_INSTRUCTION}\n\nTranscript: {transcript}",
+                "response": summary,
+            }
+            json.dump(example, outfile)
+            outfile.write("\n")
+            written += 1
+
+    logging.info(
+        f"Exported {written} training example(s) to: {output_path} "
+        f"({skipped} skipped: missing summary)"
+    )
     return output_path

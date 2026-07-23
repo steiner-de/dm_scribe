@@ -38,6 +38,14 @@ uv run --extra dev flake8 src/ tests/ run.py
 uv run --extra dev ruff check src/ tests/ run.py
 ```
 
+Fine-tuning (`train_llm.py`, `package_for_ollama.py`) needs a separate extras group — it
+pulls in `peft`/`bitsandbytes`/`trl` on top of the `transformers`/`torch`/`datasets` already
+required by the bot, and needs a CUDA GPU to actually run:
+
+```bash
+uv sync --extra train
+```
+
 Ollama must be installed and reachable at `http://localhost:11434` for summarization to work
 (`ollama pull mistral` once, then `ollama serve`). `bot.py` will attempt to auto-start it if
 it's not running when `/stop` is used.
@@ -69,22 +77,25 @@ There is no `pytest-asyncio` dependency. Tests that exercise async code (e.g.
   segments across speakers by timestamp into one chronological, character-labeled transcript.
   `summarize_with_llm()` sends that transcript to Ollama (`mistral` model) for a lore/loot/plot
   summary. `save_obsidian_note()` writes the summary as markdown to `obsidian_notes/`.
-- **`src/utils.py`** — `save_transcript_for_training`/`export_training_data` accumulate session
-  transcripts as JSONL in `training_data/`, intended as future fine-tuning data (see
-  `DND_LLM_GUIDE.md`). `export_training_data` is exposed via the (currently unimplemented in
-  code) `/export_data` command mentioned in `README.md`.
-- **`src/train_llm.py`** — scaffolding for fine-tuning a custom D&D LLM; not currently
-  functional (targets a placeholder base model and has a `Trainer`/`TrainingArguments` mixup).
-  Not wired into the bot — `summarize_with_llm` calls stock `mistral` via Ollama.
+- **`src/utils.py`** — `save_transcript_for_training(transcript, summary, session_id,
+  channel_name)` is called from `bot.py` after each session's summary is generated, saving both
+  as one training example under `training_data/`. `export_training_data()` turns all saved
+  examples into `exported_training_data.jsonl`, one `{"instruction": ..., "response": ...}` pair
+  per session (records saved before summary-capture existed, transcript-only, are skipped).
+  Exposed in Discord via the admin-only `/export_data` command in `bot.py`.
+- **`src/train_llm.py`** — LoRA/QLoRA fine-tuning script (via `peft`/`trl`) that trains a
+  `mistralai/Mistral-7B-Instruct-v0.3`-based model on `exported_training_data.jsonl`. Heavy ML
+  imports are deferred inside functions so `--help` and the pure data-loading helpers
+  (`format_example`, `load_training_dataset`, tested in `tests/test_train_llm.py`) work without
+  the `train` extras installed. Needs a CUDA GPU to actually run training.
+- **`src/package_for_ollama.py`** — merges a LoRA adapter produced by `train_llm.py` into its
+  base model and writes an Ollama `Modelfile`; prints the remaining GGUF-conversion and
+  `ollama create` steps (not automated — depends on llama.cpp, not a project dependency). The
+  resulting model becomes a drop-in swap: set `OLLAMA_MODEL=<name>` in `.env` and
+  `transcriber.summarize_with_llm` picks it up with no code changes.
 - **`src/config.py`** — all runtime config comes from environment variables (`.env`, loaded by
-  `run.py`); see `.env.example` for the full list (`DISCORD_TOKEN`, `WHISPER_MODEL`, etc.).
-
-### Known landmine
-
-`pyproject.toml` lists `discord.py>=2.0.0` as a dependency even though the project fully
-migrated to `py-cord` (`requirements.txt` pins `py-cord==2.7.2`). Both packages install into
-the same `discord` namespace and conflict — don't add `discord.py` back, and prefer fixing
-`pyproject.toml` to drop it rather than reintroducing it elsewhere.
+  `run.py`); see `.env.example` for the full list (`DISCORD_TOKEN`, `WHISPER_MODEL`,
+  `OLLAMA_MODEL`, etc.).
 
 ### Release process
 

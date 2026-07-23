@@ -176,7 +176,7 @@ In a separate PowerShell/Terminal window (keep Ollama serving in another):
 python run.py
 ```
 
-The bot should log in. In Discord, test with `!help` to see available commands.
+The bot should log in. In Discord, test with `/help` to see available commands.
 
 ### Running the Bot
 
@@ -185,7 +185,7 @@ The bot should log in. In Discord, test with `!help` to see available commands.
    ```powershell
    python run.py
    ```
-2. The bot will start. Ollama will be started automatically when you use `!stop` for the first time.
+2. The bot will start. Ollama will be started automatically when you use `/stop` for the first time.
 
 **On Windows (Manual Ollama):**
 If you prefer to start Ollama manually:
@@ -207,8 +207,8 @@ To run Ollama automatically on startup:
 5. Click OK. Ollama will now start automatically.
 
 **Ollama Server Lifecycle:**
-- Ollama **must be running** whenever you use the `!stop` command (which generates LLM summaries).
-- The bot will **automatically start Ollama** if it detects it's not running (when you use `!stop`).
+- Ollama **must be running** whenever you use the `/stop` command (which generates LLM summaries).
+- The bot will **automatically start Ollama** if it detects it's not running (when you use `/stop`).
 - You can still manually start it with `ollama serve` or via Task Scheduler for continuous operation.
 - Turning it off manually saves system resources but the bot will restart it as needed.
 
@@ -218,24 +218,28 @@ Once the bot is running and connected to your Discord server, use the following 
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `!name_me <name>` | Set the bot's nickname in the server | `!name_me Scribe` |
-| `!join` | Bot joins your current voice channel | `!join` |
-| `!leave` | Bot leaves the voice channel | `!leave` |
-| `!scribe` | Start recording audio from the voice channel | `!scribe` |
-| `!stop` | Stop recording, transcribe, generate LLM summary. Creates Obsidian note and posts to notes channel. | `!stop` |
-| `!assign_character <@user> <character> [class] [species] [gender]` | Assign a character name to a player for transcription enhancement | `!assign_character @John Fighter Dwarf Male` |
-| `!remove_character <@user>` | Remove a player's character assignment | `!remove_character @John` |
-| `!list_characters` | List all assigned player-to-character mappings | `!list_characters` |
-| `!set_notes_channel <#channel>` | Set which channel session summaries are posted to (admin only) | `!set_notes_channel #session-notes` |
-| `!get_notes_channel` | Show the current notes channel for this server | `!get_notes_channel` |
-| `!help` | Show all available commands | `!help` |
+| `/name_me <name>` | Set the bot's nickname in the server | `/name_me Scribe` |
+| `/join` | Bot joins your current voice channel | `/join` |
+| `/leave` | Bot leaves the voice channel | `/leave` |
+| `/inscribe` | Start recording audio from the voice channel | `/inscribe` |
+| `/stop` | Stop recording, transcribe, generate LLM summary. Creates Obsidian note and posts to notes channel. | `/stop` |
+| `/assign_character <user> <character_name> <character_class> <character_species> <character_gender>` | Assign a character to a player for transcription attribution | `/assign_character @John Thrain Fighter Dwarf Male` |
+| `/assign_dm <user>` | Assign a Discord user as the DM | `/assign_dm @Jane` |
+| `/remove_character <user>` | Remove a player's character assignment | `/remove_character @John` |
+| `/remove_all_characters` | Reset the entire character map | `/remove_all_characters` |
+| `/list_characters` | List all assigned player-to-character mappings | `/list_characters` |
+| `/set_notes_channel <channel>` | Set which channel session summaries are posted to (admin only) | `/set_notes_channel #session-notes` |
+| `/get_notes_channel` | Show the current notes channel for this server | `/get_notes_channel` |
+| `/export_data` | Export session data as LLM fine-tuning pairs (admin only) | `/export_data` |
+| `/sync_commands` | Re-sync slash commands with Discord (admin only) | `/sync_commands` |
+| `/help` | Show all available commands | `/help` |
 
 ### Typical D&D Session Workflow
 1. All players join the Discord voice channel
-2. Run `!join` to have the bot join the channel
-3. Run `!scribe` to start recording
+2. Run `/join` to have the bot join the channel
+3. Run `/inscribe` to start recording
 4. Play your D&D session normally
-5. Run `!stop` when done—the bot will transcribe and summarize with Mistral LLM
+5. Run `/stop` when done—the bot will transcribe and summarize with the local LLM
 6. Review the transcription and summary posted to Discord
 
 ## Configuration
@@ -329,12 +333,15 @@ Follow the implementation steps above to build the bot incrementally. Start with
 ## LLM Integration and Continuous Learning
 This bot is designed to collect transcription data for improving your custom D&D LLM:
 
-- **Data Collection**: Transcripts are automatically saved during voice calls for training.
-- **Export for Training**: Use the `/export_data` command (admin only) to export collected data to `exported_training_data.jsonl`.
-- **LLM Updates**: Transfer the exported file to your separate `dnd-homebrew-llm` repo for fine-tuning.
-- **Integration**: Connect the trained LLM via API for summarization and lore generation features.
+- **Data Collection**: Every `/stop` saves that session's transcript + summary as a training
+  pair in `training_data/`.
+- **Export for Training**: Use the `/export_data` command (admin only) to export it as
+  instruction/response pairs to `exported_training_data.jsonl`.
+- **Fine-Tuning**: Run `src/train_llm.py` (LoRA/QLoRA, needs a CUDA GPU) on the exported data.
+- **Integration**: Package the result for Ollama with `src/package_for_ollama.py`, then point
+  the bot at it by setting `OLLAMA_MODEL=<your model name>` in `.env` — no code changes needed.
 
-See `DND_LLM_GUIDE.md` for LLM training details.
+See `DND_LLM_GUIDE.md` for the full walkthrough.
 
 ## Character Mapping for D&D Sessions
 In D&D games, each player voices a specific character. To attribute transcriptions correctly, you can map Discord users to their character names.
