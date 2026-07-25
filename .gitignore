@@ -97,6 +97,7 @@ obsidian_notes/
 recordings/
 transcriptions/
 vector_store/
+session_metrics.jsonl
 
 # LLM fine-tuning data / artifacts (private session content, large model weights)
 training_data/

@@ -1,4 +1,7 @@
 import json
+import wave
+
+import pytest
 
 import utils
 
@@ -98,3 +101,36 @@ def test_export_training_data_skips_records_without_summary(tmp_path, monkeypatc
 
     assert result == str(output_path)
     assert output_path.read_text().strip() == ""
+
+
+def test_get_wav_duration_seconds_reads_real_wav_file(tmp_path):
+    path = tmp_path / "test.wav"
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(16000)
+        f.writeframes(b"\x00" * 3200)  # 1600 frames at 16kHz = 0.1s
+
+    assert utils.get_wav_duration_seconds(str(path)) == pytest.approx(0.1)
+
+
+def test_get_wav_duration_seconds_returns_zero_for_missing_file(tmp_path):
+    missing_path = str(tmp_path / "does_not_exist.wav")
+
+    assert utils.get_wav_duration_seconds(missing_path) == 0.0
+
+
+def test_log_session_metrics_appends_json_line(tmp_path, monkeypatch):
+    metrics_file = tmp_path / "session_metrics.jsonl"
+    monkeypatch.setattr(utils, "SESSION_METRICS_FILE", str(metrics_file))
+
+    utils.log_session_metrics(speaker_count=3, transcription_seconds=12.5)
+    utils.log_session_metrics(speaker_count=1, transcription_seconds=4.2)
+
+    lines = metrics_file.read_text().strip().splitlines()
+    assert len(lines) == 2
+
+    first = json.loads(lines[0])
+    assert first["speaker_count"] == 3
+    assert first["transcription_seconds"] == 12.5
+    assert "timestamp" in first

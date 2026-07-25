@@ -73,16 +73,24 @@ There is no `pytest-asyncio` dependency. Tests that exercise async code (e.g.
   aligned to the same session start time — required for the chronological merge in
   `transcriber.py` to produce correctly-ordered dialogue.
 - **`src/transcriber.py`** — `Transcriber.transcribe_speakers(user_files, character_map, ...)`
-  transcribes each speaker's isolated WAV with `faster-whisper` independently, then merges all
-  segments across speakers by timestamp into one chronological, character-labeled transcript.
-  `summarize_with_llm()` sends that transcript to Ollama (`mistral` model) for a lore/loot/plot
-  summary. `save_obsidian_note()` writes the summary as markdown to `obsidian_notes/`.
+  transcribes each speaker's isolated WAV with `faster-whisper` independently (`vad_filter=True`
+  — required, since `sync_start=True` pads every speaker's track with silence to the full
+  session length, so without VAD, transcription cost scales with session length × speaker
+  count instead of actual talk time), then merges all segments across speakers by timestamp
+  into one chronological, character-labeled transcript. `summarize_with_llm()` sends that
+  transcript to Ollama (`OLLAMA_MODEL`, default `mistral`) for a lore/loot/plot summary, with
+  an optional `prior_context` param for RAG (see `vector_store.py` below). `save_obsidian_note()`
+  writes the summary as markdown to `obsidian_notes/`.
 - **`src/utils.py`** — `save_transcript_for_training(transcript, summary, session_id,
   channel_name)` is called from `bot.py` after each session's summary is generated, saving both
   as one training example under `training_data/`. `export_training_data()` turns all saved
   examples into `exported_training_data.jsonl`, one `{"instruction": ..., "response": ...}` pair
   per session (records saved before summary-capture existed, transcript-only, are skipped).
-  Exposed in Discord via the admin-only `/export_data` command in `bot.py`.
+  Exposed in Discord via the admin-only `/export_data` command in `bot.py`. Also has
+  `get_wav_duration_seconds()` and `log_session_metrics()`, used by `bot.process_recording()`
+  to append per-session cost/capacity data (speaker count, session duration, transcription
+  and summarization wall-clock time, transcript/summary size) to `session_metrics.jsonl` —
+  meant for measuring real hosting cost/throughput during playtesting, not user-facing.
 - **`src/train_llm.py`** — LoRA/QLoRA fine-tuning script (via `peft`/`trl`) that trains a
   `mistralai/Mistral-7B-Instruct-v0.3`-based model on `exported_training_data.jsonl`. Heavy ML
   imports are deferred inside functions so `--help` and the pure data-loading helpers
@@ -93,18 +101,84 @@ There is no `pytest-asyncio` dependency. Tests that exercise async code (e.g.
   `ollama create` steps (not automated — depends on llama.cpp, not a project dependency). The
   resulting model becomes a drop-in swap: set `OLLAMA_MODEL=<name>` in `.env` and
   `transcriber.summarize_with_llm` picks it up with no code changes.
-- **`src/vector_store.py`** — `SessionVectorStore` wraps a local, file-based Chroma collection
-  (persisted under `config.VECTOR_STORE_DIR`) with embeddings from Ollama's embedding model
-  (`config.OLLAMA_EMBEDDING_MODEL`, default `nomic-embed-text`). Used two ways from `bot.py`:
-  (1) RAG — `_build_prior_context()` queries it before summarizing so `summarize_with_llm`'s
-  `prior_context` param can give the LLM continuity with past sessions; (2) search — the
-  `/recall` command queries it directly. All entries carry a `guild_id` metadata field and every
-  query filters on it, so one server's session history can't leak into another's. `add_session`/
-  `query` both fail soft (return `False`/`[]`, never raise) so a missing/unreachable Ollama
-  degrades gracefully instead of breaking `/stop`.
+- **`src/vector_store.py`** — `SessionVectorStore` wraps a Chroma collection with embeddings
+  from Ollama's embedding model (`config.OLLAMA_EMBEDDING_MODEL`, default `nomic-embed-text`,
+  reached via `config.OLLAMA_HOST`). Two client modes: embedded (`PersistentClient`, persisted
+  under `config.VECTOR_STORE_DIR`, the default) or networked (`HttpClient`, used when
+  `config.CHROMA_HOST` is set — this is what lets `src/ingest_lore.py`/`src/ask.py` reach the
+  same store from a different machine than the bot; see `EXTERNAL_SERVER_SETUP.md`). Used three
+  ways: (1) RAG — `bot._build_prior_context()` queries it before summarizing so
+  `summarize_with_llm`'s `prior_context` param can give the LLM continuity with past sessions;
+  (2) search — the `/recall` command queries it directly; (3) lore ingestion — `add_document()`
+  is the generic entry point (`add_session()` is a thin wrapper over it for the session-summary
+  case) used by `src/ingest_lore.py` to load arbitrary reference material in. `chunk_text()`
+  splits long documents into embeddable pieces (packs whole paragraphs up to `max_chars`, hard-
+  splits with overlap only when a single paragraph exceeds it). Every entry carries a `guild_id`
+  metadata field and every query filters on it, so one server's data can't leak into another's.
+  `add_document`/`query` both fail soft (return `False`/`[]`, never raise) so a missing/
+  unreachable Ollama degrades gracefully instead of breaking `/stop`.
+- **`src/ingest_lore.py`** — CLI to load homebrew lore/rulebook/reference text files into the
+  vector store (chunked via `vector_store.chunk_text`), tagged `type: "lore"` and a `source`
+  filename in metadata, distinguishing them from `type: "session"` entries. Chunk IDs are
+  deterministic (`lore:{filename}:{index}`) so re-ingesting an unchanged file is a no-op upsert;
+  note the docstring caveat about stale chunks if a file shrinks between runs.
+- **`src/ask.py`** — CLI to ask a question against the vector store (sessions + lore) and get a
+  synthesized answer: `ask()` retrieves relevant chunks via `SessionVectorStore.query`, then asks
+  Ollama to answer using only that context. Same retrieve-then-generate shape as `/recall`, but
+  `/recall` only surfaces raw matches — this synthesizes an actual answer.
 - **`src/config.py`** — all runtime config comes from environment variables (`.env`, loaded by
   `run.py`); see `.env.example` for the full list (`DISCORD_TOKEN`, `WHISPER_MODEL`,
-  `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `VECTOR_STORE_DIR`, etc.).
+  `OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_EMBEDDING_MODEL`, `VECTOR_STORE_DIR`, `CHROMA_HOST`,
+  `CHROMA_PORT`, etc.). `OLLAMA_HOST` defaults to local but can point at a remote Ollama —
+  `bot.start_ollama_server()` checks this (`_is_local_ollama_host()`) and refuses to try
+  auto-starting a remote Ollama via a local subprocess.
+
+### Known issues / planned work: multi-server (multi-guild) correctness
+
+The bot currently only runs in one Discord server at a time in practice. An audit for
+"what if this joins other servers" (2026-07-25) found real bugs that are latent with a
+single guild but would misbehave the moment a second one is active — not just scaling
+concerns. None of this is implemented yet; this is a plan for when it's picked up.
+
+1. **`self.current_voice_client` in `bot.py` is a single bot-wide slot, not per-guild —
+   the most serious one.** `/join`, `/leave`, `/inscribe`, and `/stop` all do
+   `voice_client = self.current_voice_client or self.voice_handler.get_voice_client(ctx.guild.id)`.
+   `self.current_voice_client` gets overwritten by whichever guild joined voice most
+   recently, and is checked *before* the correct per-guild lookup. Concretely: Guild A
+   joins voice, then Guild B joins voice (`self.current_voice_client` now points at B's
+   client); if Guild A's DM then runs `/inscribe`, this hands *Guild B's* voice client
+   into `start_recording()`, which derives which guild to record under from that
+   client's channel — Guild A's command could end up recording Guild B's voice channel.
+   Fix: delete `self.current_voice_client` entirely; `voice_handler.get_voice_client(guild.id)`
+   is already correct and sufficient on its own.
+
+2. **`character_map.json` is global, keyed only by `user_id`**
+   (`{user_id: {name, class, species, gender, ...}}`) — `assign_character`, `assign_dm`,
+   and `remove_character` in `bot.py` all write to it with no `guild_id` nesting. A
+   player in two different servers running this bot collides on the same entry. Needs
+   to become `{guild_id: {user_id: {...}}}`, with every character command in `bot.py`
+   threading `ctx.guild.id` through.
+
+3. **`/remove_all_characters` wipes the entire map for every server** — `self.character_map = {}`
+   isn't scoped to `ctx.guild`, so an admin in *any* server running this nukes every
+   other server's character assignments too. Needs to become guild-scoped once (2) lands.
+
+4. **Training data mixes all guilds together.** `save_transcript_for_training` (see
+   `utils.py` above) doesn't record `guild_id` at all, and `export_training_data()`/the
+   `/export_data` command export everything unfiltered — any server admin running
+   `/export_data` currently gets every other customer's session transcripts. Needs a
+   `guild_id` field added to saved training records and `/export_data` filtered to the
+   invoking guild.
+
+**Already fine, built guild-scoped from the start:** `voice_handler.py`
+(`voice_clients`/`recording_guilds` keyed by `guild_id`), `notes_channel_map.json`
+(already `{guild_id: channel_id}`), and `vector_store.py` (every entry carries
+`guild_id`, every query filters on it).
+
+**Migration note:** there's no reliable way to auto-migrate an existing
+`character_map.json` from the old flat format into the new `{guild_id: {...}}` schema,
+since it never recorded which guild each assignment belonged to. Re-running
+`/assign_character` after the change is the expected path, not a scripted migration.
 
 ### Release process
 
