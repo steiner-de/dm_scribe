@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 import json
 import os
+import wave
 
 
 def setup_logging():
@@ -112,3 +113,32 @@ def export_training_data(output_path=None):
         f"({skipped} skipped: missing summary)"
     )
     return output_path
+
+
+SESSION_METRICS_FILE = os.path.join(os.path.dirname(__file__), "..", "session_metrics.jsonl")
+
+
+def get_wav_duration_seconds(path):
+    """Return a WAV file's duration in seconds, or 0.0 if it can't be read."""
+    try:
+        with wave.open(path, "rb") as f:
+            return f.getnframes() / float(f.getframerate())
+    except (wave.Error, OSError, EOFError) as e:
+        logging.error(f"Failed to read WAV duration for {path}: {e}")
+        return 0.0
+
+
+def log_session_metrics(**metrics):
+    """
+    Append one session's timing/size metrics as a JSON line, for measuring
+    real transcription/summarization cost during playtesting (see
+    bot.process_recording). Never raises -- a failed metrics write
+    shouldn't break session processing.
+    """
+    record = {"timestamp": format_timestamp(), **metrics}
+    try:
+        with open(SESSION_METRICS_FILE, "a", encoding="utf-8") as f:
+            json.dump(record, f)
+            f.write("\n")
+    except IOError as e:
+        logging.error(f"Failed to log session metrics: {e}")

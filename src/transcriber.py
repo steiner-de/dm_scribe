@@ -3,7 +3,7 @@ Handles speech-to-text transcription.
 """
 
 from faster_whisper import WhisperModel
-from config import OLLAMA_MODEL, WHISPER_MODEL
+from config import OLLAMA_HOST, OLLAMA_MODEL, WHISPER_COMPUTE_TYPE, WHISPER_DEVICE, WHISPER_MODEL
 from utils import logging
 import requests
 from datetime import datetime
@@ -12,7 +12,9 @@ import os
 
 class Transcriber:
     def __init__(self):
-        self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        self.model = WhisperModel(
+            WHISPER_MODEL, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE
+        )
 
     def transcribe_speakers(self, user_files, character_map):
         """
@@ -33,7 +35,11 @@ class Transcriber:
         for user_id, path in user_files.items():
             label = self._label_for_user(user_id, character_map)
             try:
-                segments, _ = self.model.transcribe(path, beam_size=5)
+                # vad_filter skips non-speech segments. Per-user tracks are padded with
+                # silence to the full session length (see voice_handler's sync_start=True),
+                # so most of any one file is silence -- without this, transcription cost
+                # scales with session length * speaker count instead of actual talk time.
+                segments, _ = self.model.transcribe(path, beam_size=5, vad_filter=True)
             except Exception as e:
                 logging.error(f"Transcription error for {path}: {e}")
                 continue
@@ -104,7 +110,7 @@ class Transcriber:
             Provide a brief summary, notes on lore/loot, and any memorable quotes.
             """
             response = requests.post(
-                "http://localhost:11434/api/generate",
+                f"{OLLAMA_HOST}/api/generate",
                 json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
             )
             if response.status_code == 200:

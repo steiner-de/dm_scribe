@@ -13,7 +13,7 @@ class DummyModel:
     def __init__(self, *args, **kwargs):
         pass
 
-    def transcribe(self, audio_file_path, beam_size=5):
+    def transcribe(self, audio_file_path, beam_size=5, vad_filter=False):
         responses = {
             "alice.wav": [DummySegment(5.0, "Hello there")],
             "bob.wav": [DummySegment(1.0, "Hi Alice")],
@@ -52,6 +52,27 @@ def test_transcribe_speakers_merges_by_time_and_labels_characters():
     # listed second in user_files, so it should be merged in first.
     assert "User 2: Hi Alice" in lines[0]
     assert "Aria: Hello there" in lines[1]
+
+
+def test_transcribe_speakers_enables_vad_filter(monkeypatch):
+    """
+    Per-speaker tracks are padded with silence to the full session length
+    (voice_handler's sync_start=True), so vad_filter must stay on -- without
+    it, transcription cost scales with session length * speaker count
+    instead of actual talk time.
+    """
+    t = transcriber.Transcriber()
+    captured_kwargs = {}
+
+    def capturing_transcribe(audio_file_path, **kwargs):
+        captured_kwargs.update(kwargs)
+        return [], {}
+
+    monkeypatch.setattr(t.model, "transcribe", capturing_transcribe)
+
+    t.transcribe_speakers({"1": "recordings/alice.wav"}, {})
+
+    assert captured_kwargs.get("vad_filter") is True
 
 
 def test_save_obsidian_note_writes_markdown(tmp_path, monkeypatch):

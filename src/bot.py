@@ -9,13 +9,17 @@ import json
 import subprocess
 import requests
 import asyncio
+import ctypes.util
 import logging
 import platform
+import time
 import uuid
 from datetime import datetime
+from urllib.parse import urlparse
 from voice_handler import VoiceHandler
 from transcriber import Transcriber
-from utils import export_training_data, save_transcript_for_training
+from utils import export_training_data, get_wav_duration_seconds, log_session_metrics
+from utils import save_transcript_for_training
 from vector_store import SessionVectorStore
 
 # Configure logging
@@ -31,7 +35,7 @@ NOTES_CHANNEL_MAP_FILE = "notes_channel_map.json"
 TRANSCRIPTIONS_DIR = "transcriptions"
 OBSIDIAN_NOTES_DIR = "obsidian_notes"
 OLLAMA_TIMEOUT = 2
-OLLAMA_URL = "http://localhost:11434/api/tags"
+OLLAMA_URL = f"{config.OLLAMA_HOST}/api/tags"
 
 
 class TranscriberBot:
@@ -65,6 +69,20 @@ class TranscriberBot:
         if discord.opus.is_loaded():
             return True
 
+        if platform.system() != "Windows":
+            # On Linux/macOS, Opus ships as a system shared library (e.g. libopus0 via
+            # apt), not a filename py-cord bundles like on Windows -- ctypes.util.find_library
+            # is the correct cross-platform way to locate it (this is what
+            # discord.opus._load_default() does internally, but nothing calls that for us).
+            found = ctypes.util.find_library("opus")
+            if found:
+                try:
+                    discord.opus.load_opus(found)
+                    logger.info(f"Loaded Opus library: {found}")
+                    return True
+                except Exception as exc:
+                    logger.debug(f"Failed to load Opus library {found}: {exc}")
+
         for lib_name in ("libopus-0.dll", "opus.dll", "libopus.dll"):
             try:
                 discord.opus.load_opus(lib_name)
@@ -90,7 +108,8 @@ class TranscriberBot:
 
         logger.warning(
             "Opus library is not loaded. Voice support will not work until Opus is "
-            "installed or available via the py-cord DLL path."
+            "installed (e.g. 'sudo apt install libopus0' on Linux) or available via "
+            "the py-cord DLL path on Windows."
         )
         return False
 
@@ -227,9 +246,16 @@ class TranscriberBot:
 
             await channel.send("Recording stopped. Preparing transcription...")
 
+            speaker_count = len(user_files)
+            session_duration_seconds = max(
+                (get_wav_duration_seconds(path) for path in user_files.values()), default=0.0
+            )
+
+            transcription_start = time.perf_counter()
             enhanced_transcription = await loop.run_in_executor(
                 None, self.transcriber.transcribe_speakers, user_files, self.character_map
             )
+            transcription_seconds = time.perf_counter() - transcription_start
 
             if not enhanced_transcription.strip():
                 await channel.send("No speech was detected in the recording.")
@@ -262,12 +288,31 @@ class TranscriberBot:
             )
 
             await channel.send("Generating summary with LLM...")
+            summarization_start = time.perf_counter()
             summary = await loop.run_in_executor(
                 None,
                 self.transcriber.summarize_with_llm,
                 enhanced_transcription,
                 self.character_map,
                 prior_context,
+            )
+            summarization_seconds = time.perf_counter() - summarization_start
+
+            logger.info(
+                f"Session metrics: speakers={speaker_count} "
+                f"duration={session_duration_seconds:.0f}s "
+                f"transcription={transcription_seconds:.1f}s "
+                f"summarization={summarization_seconds:.1f}s"
+            )
+            log_session_metrics(
+                guild_id=str(guild.id),
+                channel=channel.name,
+                speaker_count=speaker_count,
+                session_duration_seconds=round(session_duration_seconds, 1),
+                transcription_seconds=round(transcription_seconds, 2),
+                summarization_seconds=round(summarization_seconds, 2),
+                transcript_chars=len(enhanced_transcription),
+                summary_chars=len(summary),
             )
 
             try:
@@ -785,8 +830,21 @@ def is_ollama_running():
     return loop.run_in_executor(None, _check_ollama)
 
 
+def _is_local_ollama_host():
+    """Whether config.OLLAMA_HOST points at this machine (vs. a remote Ollama)."""
+    return urlparse(config.OLLAMA_HOST).hostname in ("localhost", "127.0.0.1", "::1")
+
+
 async def start_ollama_server():
-    """Start the Ollama server in the background."""
+    """Start the Ollama server in the background. Only works for a local Ollama --
+    if OLLAMA_HOST points at a remote machine, there's nothing to start here."""
+    if not _is_local_ollama_host():
+        logger.error(
+            f"OLLAMA_HOST ({config.OLLAMA_HOST}) is not this machine; can't auto-start "
+            "a remote Ollama. Check that it's running there."
+        )
+        return False
+
     try:
         if platform.system() == "Windows":
             subprocess.Popen(
